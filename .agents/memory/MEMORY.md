@@ -1,0 +1,3 @@
+- [Elite-Trade restore](elite-trade-restore.md) — restored from ZIP; CSS uses Tailwind v4 @theme hex tokens, not HSL placeholders; 4 backend TS errors pre-fixed in ZIP; live trading needs ENCRYPTION_KEY+REDIS_URL.
+- [Drawing chart coordinates](drawing-chart-coordinates.md) — lightweight-charts overlays need direct time-scale X and price-scale Y conversion; placeholder anchors can silently return null.
+- [Artifact registration](artifact-registration.md) — a restored artifact directory may need separate workspace registration before it can be presented or previewed.

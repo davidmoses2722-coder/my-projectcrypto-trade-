@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "ProCryptoBot Dashboard"
+description = "A professional cryptocurrency trading dashboard with automated strategies, real-time market data, portfolio management, risk controls, and Telegram notifications."
+version = "1.0.0"
+id = "artifacts/pro-crypto-bot"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22937
+
+[services.development]
+run = "pnpm --filter @workspace/pro-crypto-bot run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/pro-crypto-bot", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/pro-crypto-bot/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22937"
+BASE_PATH = "/"

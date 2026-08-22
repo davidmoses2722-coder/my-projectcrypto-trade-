@@ -1,0 +1,422 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0B0E11; /* Binance-grade deep charcoal */
+  --color-foreground: #f8fafc;
+  
+  --color-card: #161B22;
+  --color-card-foreground: #f8fafc;
+  
+  --color-popover: #161B22;
+  --color-popover-foreground: #f8fafc;
+  
+  --color-primary: #0ea5e9; /* Soft cyan */
+  --color-primary-foreground: #ffffff;
+  
+  --color-secondary: #1A202C;
+  --color-secondary-foreground: #f8fafc;
+  
+  --color-muted: #1A202C;
+  --color-muted-foreground: #94a3b8;
+  
+  --color-accent: #F0B90B; /* Exchange gold */
+  --color-accent-foreground: #1a1300;
+  
+  --color-destructive: #F6465D; /* Exchange-grade red */
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #0ECB81; /* Exchange-grade green */
+  --color-success-foreground: #ffffff;
+  
+  --color-border: #1A202C;
+  --color-input: #1A202C;
+  --color-ring: #0ea5e9;
+  
+  --radius-xl: 1rem;
+  --radius-lg: 0.75rem;
+  --radius-md: 0.5rem;
+  --radius-sm: 0.25rem;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Courier New", monospace;
+  
+  --animate-fade-in: fadeIn 0.3s ease-out;
+  --animate-slide-up: slideUp 0.4s ease-out;
+  --animate-scale-in: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-pulse-glow: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-flash-green: flashGreen 1s ease-out;
+  --animate-flash-red: flashRed 1s ease-out;
+  --animate-ticker: ticker 150s linear infinite;
+  --animate-shake: shake 0.6s ease-in-out;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /*
+   * CRITICAL: Browsers do NOT inherit font-family into form controls by default.
+   * This forces every input, button, select, textarea to use Inter.
+   */
+  input,
+  button,
+  select,
+  textarea,
+  optgroup {
+    font-family: var(--font-sans);
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  /* Placeholder: readable, medium weight, not washed out */
+  input::placeholder,
+  textarea::placeholder {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    opacity: 0.5;
+    letter-spacing: 0;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  
+  .mobile-pad { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Glassmorphism Card Utility */
+  .premium-glass {
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  }
+  
+  .premium-glass-hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .premium-glass-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.4), 0 0 20px 0 rgba(14, 165, 233, 0.1);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Status Badges */
+  .status-badge {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .status-badge::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.2;
+    background: inherit;
+    z-index: -1;
+  }
+}
+
+/* Keyframes */
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  15% { transform: translateX(-8px); }
+  30% { transform: translateX(8px); }
+  45% { transform: translateX(-6px); }
+  60% { transform: translateX(6px); }
+  75% { transform: translateX(-3px); }
+  90% { transform: translateX(3px); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 10px currentColor, 0 0 20px currentColor; opacity: 1; }
+  50% { box-shadow: 0 0 5px currentColor, 0 0 10px currentColor; opacity: 0.7; }
+}
+
+@keyframes flashGreen {
+  0% { background-color: rgba(16, 185, 129, 0.4); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flashRed {
+  0% { background-color: rgba(239, 68, 68, 0.4); }
+  100% { background-color: transparent; }
+}
+
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+
+/* ── Elite-Trade global surface system ──────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --surface-0: #0B0E11;   /* page background base — deep charcoal */
+  --surface-1: #111827;   /* panel / card — dark graphite */
+  --surface-2: #161B22;   /* elevated card, popover, modal */
+  --surface-3: #1A202C;   /* hover / active state — dark blue-grey */
+  --hairline: rgba(148, 163, 184, 0.07);
+  --hairline-strong: rgba(148, 163, 184, 0.13);
+  --accent-gold: #F0B90B;
+  --accent-green: #0ECB81;
+  --accent-red: #F6465D;
+  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
+}
+body {
+  background:
+    radial-gradient(1200px 680px at 8% -14%, rgba(80,100,130,.10), transparent 60%),
+    radial-gradient(900px 560px at 98% -8%, rgba(60,70,95,.09), transparent 58%),
+    radial-gradient(760px 480px at 50% 110%, rgba(240,185,11,.025), transparent 62%),
+    linear-gradient(180deg, #08090c 0%, #0b0e13 38%, #090a0e 72%, #07080b 100%);
+  background-attachment: fixed;
+  position: relative;
+}
+/* Very soft film-grain noise + finer structural grid, masked toward the header — stacked in one ::before layer since an element only gets one ::before and one ::after */
+body::before {
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:-1;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E"),
+    linear-gradient(rgba(255,255,255,.012) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.012) 1px, transparent 1px);
+  background-size: 120px 120px, 42px 42px, 42px 42px;
+  mask-image: radial-gradient(ellipse 1400px 900px at 50% 0%, black, transparent 78%);
+}
+/* Faint top-of-viewport accent line — the kind of hairline separation used by
+   professional exchange terminals to separate the header from scroll content */
+body::after {
+  content:""; position:fixed; top:0; left:0; right:0; height:1px; z-index:40; pointer-events:none;
+  background: linear-gradient(90deg, transparent, rgba(14,165,233,.28), rgba(240,185,11,.16), transparent);
+}
+
+/* ── Data-dense table/row utilities — for Positions, Orders, Trade History, Markets ── */
+.data-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.data-table thead th {
+  text-align: left; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: #64748b; padding: 10px 12px; border-bottom: 1px solid var(--hairline); white-space: nowrap;
+}
+.data-table tbody td {
+  padding: 11px 12px; font-size: 13px; color: #e2e8f0; border-bottom: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+.data-table tbody tr { transition: background-color .15s ease; }
+.data-table tbody tr:hover { background: rgba(255,255,255,.02); }
+.data-row-up { color: #26a17b; }     /* Binance/Bybit-style muted teal-green for gains */
+.data-row-down { color: #f6465d; }   /* professional exchange red for losses */
+
+/* ── Surface elevation cards — an alternative to .premium-glass for denser panels ── */
+.surface-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: .9rem;
+}
+.surface-panel-elevated {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: .9rem;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.03);
+}
+
+/* ── Exchange-style pill buttons (buy/sell already covered by .trading-buy/.trading-sell) ── */
+.btn-gold {
+  display:inline-flex; align-items:center; justify-content:center; gap:.4rem;
+  background: linear-gradient(180deg, #f3c333, var(--accent-gold));
+  color: #1a1300; font-weight: 900; border-radius: .7rem; padding: .6rem 1rem;
+  box-shadow: 0 6px 20px rgba(240,185,11,.18);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.btn-gold:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(240,185,11,.28); }
+.premium-hero {
+  position:relative; overflow:hidden; display:flex; justify-content:space-between; gap:1.5rem; align-items:flex-end;
+  padding:1.75rem 2rem; border:1px solid rgba(148,163,184,.12); border-radius:1.5rem;
+  background:linear-gradient(135deg,rgba(15,30,48,.92),rgba(8,13,22,.96) 60%,rgba(9,10,18,.98));
+  box-shadow:0 24px 80px rgba(0,0,0,.35), inset 0 1px rgba(255,255,255,.04);
+}
+.premium-hero::after { content:""; position:absolute; width:420px;height:420px;right:-160px;top:-240px;border-radius:50%;background:rgba(14,165,233,.10);filter:blur(20px); }
+.premium-eyebrow { display:flex; align-items:center; gap:.45rem; color:#67e8f9; font-size:.68rem; font-weight:900; letter-spacing:.2em; text-transform:uppercase; }
+.premium-title { margin-top:.4rem; color:#fff; font-size:clamp(2rem,4vw,3rem); font-weight:900; letter-spacing:-.045em; }
+.premium-subtitle { margin-top:.55rem; color:#94a3b8; max-width:55rem; font-size:.9rem; }
+.live-pill { display:inline-flex; align-items:center; gap:.45rem; white-space:nowrap; border:1px solid rgba(34,197,94,.22); background:rgba(34,197,94,.08); color:#86efac; border-radius:999px; padding:.5rem .75rem; font-size:.65rem; font-weight:900; letter-spacing:.1em; }
+.live-pill span { width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 12px #22c55e; animation:pulseGlow 2s infinite; }
+.market-strip { display:flex; gap:.5rem; overflow-x:auto; padding:.55rem; border-radius:1rem; }
+.market-chip { min-width:150px; display:grid; grid-template-columns:1fr auto; gap:.2rem .65rem; padding:.65rem .8rem; border:1px solid transparent; border-radius:.75rem; text-align:left; color:#94a3b8; background:rgba(255,255,255,.02); transition:.2s; }
+.market-chip:hover,.market-chip.active { border-color:rgba(14,165,233,.3); background:rgba(14,165,233,.08); color:#fff; }
+.market-chip span { font-size:.72rem;color:#cbd5e1; }
+.market-chip em { grid-column:2; font-size:.68rem;font-style:normal;font-weight:800; }
+.market-chip em.up {color:#34d399}.market-chip em.down{color:#fb7185}
+.field-label { display:block; margin-bottom:.45rem; color:#64748b; font-size:.65rem; font-weight:900; text-transform:uppercase; letter-spacing:.12em; }
+.premium-input { width:100%; border:1px solid rgba(148,163,184,.12); border-radius:.8rem; background:rgba(2,6,23,.72); color:#fff; padding:.75rem .85rem; font-weight:800; outline:none; }
+.premium-input:focus { border-color:rgba(34,211,238,.5); box-shadow:0 0 0 3px rgba(34,211,238,.08); }
+.trading-buy,.trading-sell { display:flex;align-items:center;justify-content:center;gap:.4rem;border-radius:.8rem;padding:.8rem;font-weight:900;transition:.2s; }
+.trading-buy { color:#052e1b;background:#34d399;box-shadow:0 8px 25px rgba(16,185,129,.15); }
+.trading-buy:hover { background:#6ee7b7; transform:translateY(-1px); }
+.trading-sell { color:#fecdd3;background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.3); }
+.trading-sell:hover { background:rgba(244,63,94,.2); }
+.notice-success,.notice-error { display:flex;align-items:center;gap:.45rem;border-radius:.8rem;padding:.7rem;font-size:.75rem;font-weight:700; }
+.notice-success{color:#86efac;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.18)}
+.notice-error{color:#fda4af;background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.18)}
+.premium-glass {
+  position:relative;
+  background:linear-gradient(180deg,rgba(22,27,34,.66),rgba(11,14,19,.78));
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-color:var(--hairline-strong)!important;
+  box-shadow:0 20px 60px rgba(0,0,0,.32), inset 0 1px rgba(255,255,255,.035);
+  transition: border-color .25s var(--ease-premium), box-shadow .25s var(--ease-premium), transform .25s var(--ease-premium);
+}
+.premium-glass::before {
+  content:""; position:absolute; top:0; left:1rem; right:1rem; height:1px;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.09), transparent); pointer-events:none;
+}
+/* Opt-in hover lift for interactive glass surfaces — apply alongside .premium-glass, not automatic on every static panel */
+.premium-glass.et-hoverable:hover {
+  border-color: rgba(148,163,184,.22)!important;
+  box-shadow: 0 26px 70px rgba(0,0,0,.4), 0 0 0 1px rgba(14,165,233,.06), inset 0 1px rgba(255,255,255,.05);
+  transform: translateY(-1px);
+}
+@media (max-width: 768px) { .premium-hero{padding:1.25rem;align-items:flex-start;flex-direction:column}.premium-title{font-size:2rem}.market-chip{min-width:135px} }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PREMIUM VISUAL SYSTEM — buttons, tables, cards, sidebar/topbar, motion
+   Pure presentation. No component logic depends on these; safe to apply
+   as additive classes wherever a bespoke button/table wants the shared look.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.et-btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+  font-weight:800; font-size:.8rem; letter-spacing:.01em; border-radius:.7rem;
+  padding:.65rem 1.1rem; border:1px solid transparent; cursor:pointer;
+  transition: background-color .18s var(--ease-premium), border-color .18s var(--ease-premium),
+              transform .12s var(--ease-premium), box-shadow .18s var(--ease-premium), opacity .18s ease;
+  user-select:none;
+}
+.et-btn:active { transform: scale(.97); }
+.et-btn:disabled, .et-btn[aria-disabled="true"] {
+  opacity:.4; cursor:not-allowed; transform:none!important; box-shadow:none!important;
+}
+.et-btn-primary {
+  background: linear-gradient(180deg, #12b981, var(--accent-green));
+  color:#04150d; box-shadow: 0 8px 24px rgba(14,203,129,.16);
+}
+.et-btn-primary:hover:not(:disabled) { filter:brightness(1.08); box-shadow:0 10px 30px rgba(14,203,129,.26); transform:translateY(-1px); }
+.et-btn-danger {
+  background: rgba(246,70,93,.1); color:#ffb3bd; border-color: rgba(246,70,93,.28);
+}
+.et-btn-danger:hover:not(:disabled) { background:rgba(246,70,93,.18); border-color:rgba(246,70,93,.4); transform:translateY(-1px); }
+.et-btn-ghost {
+  background: rgba(255,255,255,.02); color:#94a3b8; border-color: var(--hairline);
+}
+.et-btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,.045); color:#e2e8f0; border-color: var(--hairline-strong); }
+.et-btn-gold {
+  background: linear-gradient(180deg, #f3c333, var(--accent-gold));
+  color: #1a1300; box-shadow: 0 8px 24px rgba(240,185,11,.16);
+}
+.et-btn-gold:hover:not(:disabled) { filter:brightness(1.06); box-shadow:0 10px 30px rgba(240,185,11,.26); transform:translateY(-1px); }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.et-card {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  transition: border-color .22s var(--ease-premium), box-shadow .22s var(--ease-premium), transform .22s var(--ease-premium);
+}
+.et-card-hoverable:hover {
+  border-color: var(--hairline-strong);
+  box-shadow: 0 16px 44px rgba(0,0,0,.3);
+  transform: translateY(-2px);
+}
+
+/* ── Tables — Binance-grade density and hover ───────────────────────────────
+   Extends the existing .data-table rules with softer separators and a
+   slightly larger row target for comfortable scanning. */
+.data-table tbody tr { position:relative; }
+.data-table tbody tr:hover { background: rgba(255,255,255,.025); }
+.data-table thead th { border-bottom-color: var(--hairline-strong); }
+.data-table tbody td { border-bottom-color: var(--hairline); }
+
+/* ── Sidebar / top navigation polish ────────────────────────────────────────
+   Applied as opt-in classes to Header.tsx's outer bar / nav buttons. */
+.et-topbar {
+  background: linear-gradient(180deg, rgba(17,24,39,.82), rgba(11,14,17,.9));
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border-bottom: 1px solid var(--hairline);
+  box-shadow: 0 12px 32px rgba(0,0,0,.28);
+}
+.et-nav-item {
+  position: relative; transition: color .18s ease, background-color .18s ease;
+}
+.et-nav-item.active::after {
+  content:""; position:absolute; left:12px; right:12px; bottom:0; height:2px; border-radius:2px;
+  background: linear-gradient(90deg, #0ea5e9, var(--accent-gold));
+}
+
+/* ── Motion — subtle only, per brief: fade / scale / slide, nothing flashy ── */
+.et-fade-in    { animation: fadeIn .3s var(--ease-premium) both; }
+.et-slide-up   { animation: slideUp .35s var(--ease-premium) both; }
+.et-scale-in   { animation: scaleIn .2s var(--ease-premium) both; }
+@keyframes scaleIn { from { opacity:0; transform:scale(.97); } to { opacity:1; transform:scale(1); } }
+
+/* ── Typography hierarchy ────────────────────────────────────────────────── */
+.et-eyebrow { font-size:.66rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:#64748b; }
+.et-figure  { font-variant-numeric: tabular-nums; font-weight:800; letter-spacing:-.01em; }
+
