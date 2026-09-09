@@ -55,6 +55,19 @@ export interface FuturesOrderInput {
   clientOrderId?: string;
   tpPrice?: number;
   slPrice?: number;
+  // Advanced order type fields
+  orderType?: string;
+  triggerPrice?: number;
+  triggerDirection?: "above" | "below";
+  trailingOffsetPct?: number;
+  trailingActivationPrice?: number;
+  twapNumSlices?: number;
+  twapIntervalSec?: number;
+  scaledMinPrice?: number;
+  scaledMaxPrice?: number;
+  scaledNumOrders?: number;
+  chaseOffsetTicks?: number;
+  postOnly?: boolean;
 }
 
 export interface FuturesOrderResult {
@@ -477,11 +490,13 @@ interface PaperPosition {
   createdAt: number;
 }
 
+type PaperOrderType = "market" | "limit" | "trigger" | "trailing_stop" | "post_only" | "twap" | "scaled" | "chase_limit";
+
 interface PaperOrder {
   id: string;
   symbol: string;
   side: "buy" | "sell";
-  type: "market" | "limit";
+  type: PaperOrderType;
   amount: number;
   price: number | null;
   reduceOnly: boolean;
@@ -490,35 +505,235 @@ interface PaperOrder {
   status: "open" | "filled" | "cancelled";
   filledAt: number | null;
   createdAt: number;
+  // Extended fields for advanced order types
+  triggerPrice?: number;
+  triggerDirection?: "above" | "below";
+  trailingActivationPrice?: number;
+  trailingOffsetPct?: number;
+  trailingHighWater?: number;
+  trailingActivated?: boolean;
+  // TWAP
+  twapTotalMargin?: number;
+  twapNumSlices?: number;
+  twapIntervalMs?: number;
+  twapSliceIndex?: number;
+  twapSliceMargin?: number;
+  twapExecutedSlices?: number;
+  // Scaled
+  scaledMinPrice?: number;
+  scaledMaxPrice?: number;
+  scaledNumOrders?: number;
+  // Chase Limit
+  chaseOffsetTicks?: number;
+  // Notification helpers
+  orderLabel?: string;
 }
 
 const paperPositions = new Map<string, PaperPosition>();
-const paperOrders = new Map<string, PaperOrder>();
+const paperOrders = new Map<string, PaperOrder>(); // All orders (filled, cancelled, and open)
+const paperOpenOrders = new Map<string, PaperOrder>(); // Pending open orders awaiting execution
 const paperBalance = { total: 10000, available: 10000, used: 0, unrealizedPnl: 0 };
+
+// TWAP slice timers — keyed by orderId
+const twapTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 let paperIdCounter = 0;
 function nextPaperId(): string { return `paper_${Date.now()}_${++paperIdCounter}`; }
 
+// ── Internal: fill a paper market order into a position ────────────────────
+function fillPaperMarketOrder(order: PaperOrder, price: number): FuturesOrderResult {
+  const posSide: "long" | "short" = order.side === "buy" ? "long" : "short";
+  const existingKey = `${order.symbol}_${posSide}`;
+  const existing = paperPositions.get(existingKey);
+
+  if (existing && order.reduceOnly) {
+    const closeAmount = Math.min(order.amount, existing.contracts);
+    const pnl = posSide === "long"
+      ? (price - existing.entryPrice) * closeAmount
+      : (existing.entryPrice - price) * closeAmount;
+    const marginReturned = existing.contracts > 0 ? (existing.initialMargin * closeAmount) / existing.contracts : 0;
+    existing.contracts -= closeAmount;
+    existing.realizedPnl += pnl;
+    paperBalance.total += pnl;
+    paperBalance.available += marginReturned;
+    paperBalance.used -= marginReturned;
+    if (existing.contracts <= 0) paperPositions.delete(existingKey);
+  } else {
+    const margin = (order.amount * price) / order.leverage;
+    if (margin > paperBalance.available) {
+      order.status = "cancelled";
+      return { success: false, orderId: order.id, price: null, amount: null, error: "Insufficient margin" };
+    }
+    paperBalance.available -= margin;
+    paperBalance.used += margin;
+    const maintenanceMarginRate = 0.004;
+    let liquidationPrice: number | null = null;
+    if (posSide === "long") liquidationPrice = price * (1 - 1 / order.leverage + maintenanceMarginRate);
+    else liquidationPrice = price * (1 + 1 / order.leverage - maintenanceMarginRate);
+
+    if (existing) {
+      const totalContracts = existing.contracts + order.amount;
+      existing.entryPrice = (existing.entryPrice * existing.contracts + price * order.amount) / totalContracts;
+      existing.contracts = totalContracts;
+      existing.initialMargin += margin;
+      existing.markPrice = price;
+    } else {
+      paperPositions.set(existingKey, {
+        id: order.id, symbol: order.symbol, side: posSide, contracts: order.amount,
+        entryPrice: price, markPrice: price, leverage: order.leverage,
+        marginMode: order.marginMode, initialMargin: margin,
+        unrealizedPnl: 0, realizedPnl: 0, liquidationPrice,
+        tpPrice: null, slPrice: null, createdAt: Date.now(),
+      });
+    }
+  }
+
+  order.status = "filled";
+  order.filledAt = Date.now();
+  order.price = price;
+  paperOrders.set(order.id, order);
+  paperOpenOrders.delete(order.id);
+  return { success: true, orderId: order.id, price, amount: order.amount, status: "filled" };
+}
+
+// ── Internal: evaluate pending open orders against current market data ─────
+export function paperEvaluatePendingOrders(markPrice: number, bestBid: number, bestAsk: number): void {
+  const toFill: { order: PaperOrder; fillPrice: number }[] = [];
+
+  for (const order of paperOpenOrders.values()) {
+    if (order.status !== "open") continue;
+
+    switch (order.type) {
+      case "limit": {
+        if (order.side === "buy" && bestAsk <= (order.price ?? Infinity)) {
+          toFill.push({ order, fillPrice: order.price! });
+        } else if (order.side === "sell" && bestBid >= (order.price ?? 0)) {
+          toFill.push({ order, fillPrice: order.price! });
+        }
+        break;
+      }
+      case "trigger": {
+        const tp = order.triggerPrice ?? 0;
+        if (tp <= 0) break;
+        const crossed = order.triggerDirection === "above"
+          ? markPrice >= tp
+          : markPrice <= tp;
+        if (crossed) {
+          // Execute as market order at current mark price
+          toFill.push({ order, fillPrice: markPrice });
+        }
+        break;
+      }
+      case "trailing_stop": {
+        const activation = order.trailingActivationPrice ?? 0;
+        const offsetPct = order.trailingOffsetPct ?? 1;
+        if (activation <= 0) break;
+        // Track high/low watermark
+        if (order.side === "buy") {
+          // Short trailing stop: activates when price rises above activation, triggers when price drops from high by offset%
+          if (!order.trailingActivated) {
+            if (markPrice >= activation) {
+              order.trailingActivated = true;
+              order.trailingHighWater = markPrice;
+            }
+          }
+          if (order.trailingActivated) {
+            if (markPrice > (order.trailingHighWater ?? 0)) order.trailingHighWater = markPrice;
+            const triggerLevel = (order.trailingHighWater ?? markPrice) * (1 - offsetPct / 100);
+            if (markPrice <= triggerLevel) {
+              toFill.push({ order, fillPrice: markPrice });
+            }
+          }
+        } else {
+          // Long trailing stop: activates when price drops below activation, triggers when price rises from low by offset%
+          if (!order.trailingActivated) {
+            if (markPrice <= activation) {
+              order.trailingActivated = true;
+              order.trailingHighWater = markPrice;
+            }
+          }
+          if (order.trailingActivated) {
+            if (markPrice < (order.trailingHighWater ?? Infinity)) order.trailingHighWater = markPrice;
+            const triggerLevel = (order.trailingHighWater ?? markPrice) * (1 + offsetPct / 100);
+            if (markPrice >= triggerLevel) {
+              toFill.push({ order, fillPrice: markPrice });
+            }
+          }
+        }
+        break;
+      }
+      case "post_only": {
+        // Post-only = limit order that is cancelled if it would match immediately
+        // In paper mode, if the price already crosses, reject it
+        if (order.side === "buy" && bestAsk <= (order.price ?? Infinity)) {
+          order.status = "cancelled";
+          paperOrders.set(order.id, order);
+          paperOpenOrders.delete(order.id);
+        } else if (order.side === "sell" && bestBid >= (order.price ?? 0)) {
+          order.status = "cancelled";
+          paperOrders.set(order.id, order);
+          paperOpenOrders.delete(order.id);
+        }
+        // Otherwise it stays open as a maker order
+        break;
+      }
+      case "chase_limit": {
+        // Auto-adjust limit price to best bid/ask + offset
+        const offset = order.chaseOffsetTicks ?? 0;
+        const tickSize = markPrice >= 100 ? 0.1 : markPrice >= 1 ? 0.001 : 0.00001;
+        if (order.side === "buy") {
+          order.price = bestBid + offset * tickSize;
+        } else {
+          order.price = bestAsk - offset * tickSize;
+        }
+        // Check if it can fill
+        if (order.side === "buy" && bestAsk <= order.price) {
+          toFill.push({ order, fillPrice: order.price });
+        } else if (order.side === "sell" && bestBid >= order.price) {
+          toFill.push({ order, fillPrice: order.price });
+        }
+        break;
+      }
+      case "twap": {
+        // TWAP is handled by timer, not by price evaluation
+        break;
+      }
+      case "scaled": {
+        // Scaled orders are pre-created as individual limit orders, already in openOrders
+        break;
+      }
+    }
+  }
+
+  // Execute all orders that should fill
+  for (const { order, fillPrice } of toFill) {
+    fillPaperMarketOrder(order, fillPrice);
+  }
+}
+
 export function paperGetPositions(): FuturesPositionResult[] {
-  return Array.from(paperPositions.values()).map((p) => ({
-    symbol: p.symbol,
-    side: p.side,
-    contracts: p.contracts,
-    entryPrice: p.entryPrice,
-    markPrice: p.markPrice,
-    liquidationPrice: p.liquidationPrice,
-    leverage: p.leverage,
-    marginMode: p.marginMode,
-    initialMargin: p.initialMargin,
-    unrealizedPnl: p.unrealizedPnl,
-    realizedPnl: p.realizedPnl,
-  }));
+  return Array.from(paperPositions.values())
+    .filter(p => p.contracts > 0)
+    .map((p) => ({
+      symbol: p.symbol,
+      side: p.side,
+      contracts: p.contracts,
+      entryPrice: p.entryPrice,
+      markPrice: p.markPrice,
+      liquidationPrice: p.liquidationPrice,
+      leverage: p.leverage,
+      marginMode: p.marginMode,
+      initialMargin: p.initialMargin,
+      unrealizedPnl: p.unrealizedPnl,
+      realizedPnl: p.realizedPnl,
+    }));
 }
 
 export function paperGetAccount(): FuturesAccountResult {
-  // Recalculate unrealized PnL from positions
+  // Recalculate unrealized PnL from active positions only
   let unrealizedPnl = 0;
   for (const pos of paperPositions.values()) {
+    if (pos.contracts <= 0) continue;
     if (pos.side === "long") {
       pos.unrealizedPnl = (pos.markPrice - pos.entryPrice) * pos.contracts;
     } else {
@@ -542,7 +757,46 @@ export function paperGetOrders(): PaperOrder[] {
   return Array.from(paperOrders.values()).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export function paperUpdateMarkPrice(symbol: string, markPrice: number): void {
+export function paperGetOpenOrders(): PaperOrder[] {
+  return Array.from(paperOpenOrders.values())
+    .filter(o => o.status === "open")
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function paperCancelOpenOrder(orderId: string): { success: boolean; error?: string } {
+  const order = paperOpenOrders.get(orderId);
+  if (!order) return { success: false, error: "Order not found" };
+  if (order.status !== "open") return { success: false, error: "Order is not open" };
+
+  order.status = "cancelled";
+  paperOrders.set(order.id, order);
+  paperOpenOrders.delete(order.id);
+
+  // Cancel TWAP timer if active
+  const timer = twapTimers.get(orderId);
+  if (timer) {
+    clearInterval(timer);
+    twapTimers.delete(orderId);
+  }
+
+  // Refund held margin for the order
+  if (order.twapTotalMargin && order.twapSliceIndex != null && order.twapNumSlices) {
+    const remainingSlices = order.twapNumSlices - (order.twapExecutedSlices ?? 0);
+    const refundPerSlice = order.twapSliceMargin ?? (order.twapTotalMargin / order.twapNumSlices);
+    const refund = remainingSlices * refundPerSlice;
+    paperBalance.available += refund;
+    paperBalance.used -= refund;
+  } else {
+    // Regular open order — refund the held margin
+    const heldMargin = (order.amount * (order.price ?? 0)) / order.leverage;
+    paperBalance.available += heldMargin;
+    paperBalance.used -= heldMargin;
+  }
+
+  return { success: true };
+}
+
+export function paperUpdateMarkPrice(symbol: string, markPrice: number, bestBid?: number, bestAsk?: number): void {
   for (const pos of paperPositions.values()) {
     if (pos.symbol === symbol || pos.symbol.includes(symbol.split("/")[0])) {
       pos.markPrice = markPrice;
@@ -552,6 +806,10 @@ export function paperUpdateMarkPrice(symbol: string, markPrice: number): void {
         pos.unrealizedPnl = (pos.entryPrice - markPrice) * pos.contracts;
       }
     }
+  }
+  // Evaluate pending open orders against current price
+  if (markPrice > 0) {
+    paperEvaluatePendingOrders(markPrice, bestBid ?? markPrice, bestAsk ?? markPrice);
   }
 }
 

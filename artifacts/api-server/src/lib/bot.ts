@@ -591,9 +591,10 @@ async function tick(): Promise<void> {
         else if (t.last <= p.sl) reason = "stop_loss";
         if (reason) {
           await closePosition(reason, t.last);
-        } else if (sig.action === "SELL") {
-          // Graceful exit: strategy says conditions reversed (before SL/TP hits)
-          pushLog("info", `[Strategy] SELL signal — closing position early. ${sig.reason}`);
+        } else if (sig.action === "SELL" || sig.action === "SHORT") {
+          // Graceful exit: strategy says conditions reversed (before SL/TP hits).
+          // SELL = explicit exit, SHORT = bearish signal — both close the open long.
+          pushLog("info", `[Strategy] ${sig.action} signal — closing position early. ${sig.reason}`);
           await closePosition("strategy_exit", t.last);
         }
       }
@@ -618,6 +619,9 @@ async function tick(): Promise<void> {
         // Throttle-log portfolio block to avoid SSE spam (once per ~12 ticks)
         pushLog("info", `[Portfolio] Entry blocked — ${pg.reason}`);
       }
+    } else if (sig.action === "SHORT" && !state.position && state.tickCount % 12 === 0) {
+      // SHORT signal with no open position — spot-only mode cannot open shorts
+      pushLog("info", `[Strategy] SHORT signal received but no open position to close (spot mode) — ${sig.reason}`);
     }
 
     // ── Daily loss check — hard enforcement via riskService ──────────────
@@ -1471,7 +1475,8 @@ export function buildStatus() {
     testMode: state.config.testMode,
     symbol: state.config.symbol,
     lastPrice: state.lastPrice,
-    position: state.position,
+    // Guard: return null for ghost positions with zero/negative quantity
+    position: (state.position && Number(state.position.qty) > 0) ? state.position : null,
     dailyPnL: state.dailyPnL,
     totalTrades: state.totalTrades,
     winningTrades: state.winningTrades,
@@ -1806,14 +1811,29 @@ export async function restoreOpenPositionsFromDb(): Promise<RestorePositionsResu
   const result: RestorePositionsResult = { restoredCount: 0, restored: [], multiplePositionsWarning: false };
   try {
     const rows = await store.listOpenPositions();
-    if (rows.length === 0) {
-      logger.info("Startup: no open positions to restore");
+    // Purge ghost rows: positions with zero/negative quantity that should have been closed
+    for (const row of rows) {
+      const qty = Number(row.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        logger.warn({ positionId: row.positionId, symbol: row.symbol, quantity: row.quantity },
+          "restoreOpenPositions: purging ghost position with zero/negative quantity");
+        void store.closePositionRecord(row.positionId, {
+          realizedPnlUsd: 0, closeReason: "ghost_purge_zero_qty", finalPrice: undefined,
+        });
+      }
+    }
+    const activeRows = rows.filter(r => {
+      const q = Number(r.quantity);
+      return Number.isFinite(q) && q > 0;
+    });
+    if (activeRows.length === 0) {
+      logger.info("Startup: no open positions to restore (ghosts purged)");
       return result;
     }
-    if (rows.length > 1) {
+    if (activeRows.length > 1) {
       result.multiplePositionsWarning = true;
       logger.warn(
-        { count: rows.length },
+        { count: activeRows.length },
         "Startup: multiple open position rows found, but bot.ts only supports one active slot (state.position) — " +
         "only the first will have automated SL/TP-hit exit armed. See audit P1 Fix #8.",
       );
@@ -1821,7 +1841,7 @@ export async function restoreOpenPositionsFromDb(): Promise<RestorePositionsResu
 
     let assignedBotSlot = false;
 
-    for (const row of rows) {
+    for (const row of activeRows) {
       const qty = Number(row.quantity);
       const entryPrice = Number(row.entryPrice);
       const slPrice = row.stopLoss != null ? Number(row.stopLoss) : null;

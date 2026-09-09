@@ -109,6 +109,7 @@ interface FormState {
   maxPositionSizePct:   number;
   maxTradesPerDay:      number;
   tradeCooldownMs:      number;
+  leverage:             number;
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -178,6 +179,7 @@ export function BotConfigView({
     maxPositionSizePct:   0.10,
     maxTradesPerDay:      20,
     tradeCooldownMs:      30000,
+    leverage:             1,
   });
 
   const [busy,       setBusy]       = useState(false);
@@ -316,6 +318,7 @@ export function BotConfigView({
     maxPositionSizePct:   form.maxPositionSizePct,
     maxTradesPerDay:      form.maxTradesPerDay,
     tradeCooldownMs:      form.tradeCooldownMs,
+    leverage:             form.leverage,
   });
 
   const flash = (ok: boolean, text: string, ms = 6000) => {
@@ -887,11 +890,11 @@ export function BotConfigView({
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] uppercase tracking-widest text-gray-600 font-bold">Active sizing</p>
-                <p className="text-sm font-black text-cyan-400">
+                <p className="text-[10px] uppercase tracking-widest text-gray-600 font-bold">Active sizing</p>                  <p className="text-sm font-black text-cyan-400">
                   {form.positionSizeMode === "fixed_usdt" ? `$${form.fixedSizeUsdt.toFixed(2)} fixed` :
                    form.positionSizeMode === "pct_portfolio" ? `${(form.portfolioSizePct * 100).toFixed(1)}% portfolio` :
                    `${(form.riskPerTradePct * 100).toFixed(2)}% risk`}
+                  {form.leverage > 1 ? ` · ${form.leverage}× lev` : ""}
                 </p>
               </div>
             </div>
@@ -926,15 +929,15 @@ export function BotConfigView({
                 </div>
                 <div>
                   <label className="text-[11px] text-gray-500 block mb-1.5">Portfolio Allocation (%)</label>
-                  <input type="number" min={0.1} max={50} step={0.1} value={form.portfolioSizePct * 100}
-                    onChange={e => set("portfolioSizePct", Math.max(0.001, +e.target.value / 100))}
+                  <input type="number" min={0.1} max={50} step={0.1} value={+(form.portfolioSizePct * 100).toFixed(2)}
+                    onChange={e => set("portfolioSizePct", Math.max(0.001, +(+e.target.value / 100).toFixed(6)))}
                     disabled={form.positionSizeMode !== "pct_portfolio"}
                     className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold disabled:opacity-40" />
                 </div>
                 <div>
                   <label className="text-[11px] text-gray-500 block mb-1.5">Risk Per Trade (%)</label>
-                  <input type="number" min={0.25} max={5} step={0.05} value={form.riskPerTradePct * 100}
-                    onChange={e => set("riskPerTradePct", Math.max(0.0025, +e.target.value / 100))}
+                  <input type="number" min={0.25} max={5} step={0.05} value={+(form.riskPerTradePct * 100).toFixed(2)}
+                    onChange={e => set("riskPerTradePct", Math.max(0.0025, +(+e.target.value / 100).toFixed(6)))}
                     disabled={form.positionSizeMode !== "auto_risk"}
                     className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold disabled:opacity-40" />
                 </div>
@@ -1005,8 +1008,8 @@ export function BotConfigView({
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div>
                   <label className="text-[11px] text-gray-500 block mb-1.5">Max Position / Balance (%)</label>
-                  <input type="number" min={1} max={95} step={1} value={form.maxPositionSizePct * 100}
-                    onChange={e => set("maxPositionSizePct", Math.max(0.01, Math.min(0.95, +e.target.value / 100)))}
+                  <input type="number" min={1} max={95} step={1} value={+(form.maxPositionSizePct * 100).toFixed(1)}
+                    onChange={e => set("maxPositionSizePct", Math.max(0.01, Math.min(0.95, +(+e.target.value / 100).toFixed(4))))}
                     className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" />
                 </div>
                 <div>
@@ -1034,6 +1037,55 @@ export function BotConfigView({
                     className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" />
                 </div>
               </div>
+            </div>
+
+            {/* Leverage multiplier */}
+            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.03] p-4 space-y-3">
+              <div>
+                <p className="text-sm font-black text-white">⚡ Leverage</p>
+                <p className="text-[11px] text-gray-600 mt-1">
+                  Apply a leverage multiplier to all bot orders. A $25 margin at 10× = $250 notional position.
+                  A 0.20% move becomes +$0.50 instead of +$0.05.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {([1, 2, 3, 5, 10, 20, 25, 50, 100]).map((lev) => (
+                  <button
+                    key={lev}
+                    type="button"
+                    onClick={() => set("leverage", lev)}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold border transition-all ${
+                      form.leverage === lev
+                        ? lev <= 5 ? "border-green-500/60 bg-green-500/15 text-green-400"
+                        : lev <= 20 ? "border-amber-500/60 bg-amber-500/15 text-amber-400"
+                        : "border-red-500/60 bg-red-500/15 text-red-400"
+                        : "border-gray-700 bg-gray-800 text-gray-500 hover:border-gray-600 hover:text-gray-300"
+                    }`}
+                  >
+                    {lev}×
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] text-gray-500">Custom leverage:</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={125}
+                  step={1}
+                  value={form.leverage}
+                  onChange={e => set("leverage", Math.max(1, Math.min(125, Math.round(+e.target.value))))}
+                  className="w-24 bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold"
+                />
+                <span className="text-gray-500 text-xs">×</span>
+              </div>
+              {form.leverage > 1 && (
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-3">
+                  <p className="text-[11px] text-amber-400/80 font-bold">
+                    With {form.leverage}× leverage on $${form.fixedSizeUsdt.toFixed(0)} margin → ${form.fixedSizeUsdt * form.leverage} notional position size
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Position management — automatic, always-on per open position */}
@@ -1067,8 +1119,8 @@ export function BotConfigView({
               <summary className="cursor-pointer text-xs font-bold text-gray-500 hover:text-gray-300">Advanced compatibility settings</summary>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
                 <div><label className="text-[11px] text-gray-500 block mb-1.5">Fallback Trade Amount</label><input type="number" min={5} value={form.orderSizeUsdt} onChange={e => set("orderSizeUsdt", +e.target.value)} className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" /></div>
-                <div><label className="text-[11px] text-gray-500 block mb-1.5">Fallback Stop Loss (%)</label><input type="number" step={0.1} value={form.stopLoss * 100} onChange={e => set("stopLoss", +e.target.value / 100)} className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" /></div>
-                <div><label className="text-[11px] text-gray-500 block mb-1.5">Fallback Take Profit (%)</label><input type="number" step={0.1} value={form.takeProfit * 100} onChange={e => set("takeProfit", +e.target.value / 100)} className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" /></div>
+                <div><label className="text-[11px] text-gray-500 block mb-1.5">Fallback Stop Loss (%)</label><input type="number" step={0.1} value={+(form.stopLoss * 100).toFixed(2)} onChange={e => set("stopLoss", +(+e.target.value / 100).toFixed(4))} className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" /></div>
+                <div><label className="text-[11px] text-gray-500 block mb-1.5">Fallback Take Profit (%)</label><input type="number" step={0.1} value={+(form.takeProfit * 100).toFixed(2)} onChange={e => set("takeProfit", +(+e.target.value / 100).toFixed(4))} className="w-full bg-gray-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold" /></div>
               </div>
             </details>
           </PremiumCardContent>

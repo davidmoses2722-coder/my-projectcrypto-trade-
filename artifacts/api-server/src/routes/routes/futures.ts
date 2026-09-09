@@ -229,10 +229,33 @@ router.post("/futures/order", async (req: Request, res: Response): Promise<void>
         res.status(400).json({ ok: false, error: "Cannot determine current price for paper market order" }); return;
       }
 
+      // Extract advanced order type fields from request body
+      const triggerPrice = body.triggerPrice != null ? Number(body.triggerPrice) : undefined;
+      const triggerDirection = body.triggerDirection === "below" ? "below" as const : "above" as const;
+      const trailingOffsetPct = body.trailingOffsetPct != null ? Number(body.trailingOffsetPct) : undefined;
+      const trailingActivationPrice = body.trailingActivationPrice != null ? Number(body.trailingActivationPrice) : undefined;
+      const twapNumSlices = body.twapNumSlices != null ? Number(body.twapNumSlices) : undefined;
+      const twapIntervalSec = body.twapIntervalSec != null ? Number(body.twapIntervalSec) : undefined;
+      const scaledMinPrice = body.scaledMinPrice != null ? Number(body.scaledMinPrice) : undefined;
+      const scaledMaxPrice = body.scaledMaxPrice != null ? Number(body.scaledMaxPrice) : undefined;
+      const scaledNumOrders = body.scaledNumOrders != null ? Number(body.scaledNumOrders) : undefined;
+      const chaseOffsetTicks = body.chaseOffsetTicks != null ? Number(body.chaseOffsetTicks) : undefined;
+      const postOnly = Boolean(body.postOnly);
+
+      // Map frontend orderType to backend type
+      let backendType: "market" | "limit" = "market";
+      if (orderType === "LIMIT" || orderType === "POST_ONLY" || orderType === "CHASE_LIMIT") backendType = "limit";
+      if (orderType === "TRIGGER" || orderType === "TRAILING_STOP" || orderType === "TWAP" || orderType === "SCALED") backendType = "limit";
+
       const result = await futuresExchange.paperCreateOrder({
-        symbol, side, type: orderType === "LIMIT" ? "limit" : "market",
+        symbol, side, type: backendType,
         amount: quantity, price: limitPrice, leverage, marginMode,
         reduceOnly: false, tpPrice, slPrice,
+        orderType, triggerPrice, triggerDirection,
+        trailingOffsetPct, trailingActivationPrice,
+        twapNumSlices, twapIntervalSec,
+        scaledMinPrice, scaledMaxPrice, scaledNumOrders,
+        chaseOffsetTicks, postOnly,
       }, lastPrice);
 
       if (!result.success) { res.status(400).json({ ok: false, error: result.error }); return; }
@@ -245,10 +268,10 @@ router.post("/futures/order", async (req: Request, res: Response): Promise<void>
           orderType: orderType === "LIMIT" ? "LIMIT" : "MARKET",
           limitPrice: limitPrice != null ? String(limitPrice) : null,
           quantity: String(quantity), remainingQuantity: String(quantity),
-          status: orderType === "LIMIT" ? "open" : "filled",
+          status: (orderType === "MARKET" && backendType === "market") ? "filled" : "open",
           source: "MANUAL", exchange: "paper", isPaper: true,
           market: "futures", positionSide, leverage, marginMode,
-          filledAt: orderType === "LIMIT" ? null : new Date(),
+          filledAt: (orderType === "MARKET" && backendType === "market") ? new Date() : null,
         });
       } catch (dbErr) {
         logger.error({ err: dbErr, orderId }, "futures.order: DB write failed");

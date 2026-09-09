@@ -30,6 +30,8 @@ export interface PositionActionButtonsProps {
   /** Pass live position data for trailing/breakeven state awareness */
   trailingActive?: boolean;
   breakevenActive?: boolean;
+  /** Called after any successful position action so the parent can refresh trades */
+  onActionSuccess?: () => void;
 }
 
 // ─── Action types ─────────────────────────────────────────────────────────────
@@ -96,6 +98,7 @@ function Row({ label, value, color = "text-white" }: { label: string; value: str
 export function PositionActionButtons({
   symbol, pnlUsd, pnlPct, entry, currentPrice, positionSize,
   calledBy = "unknown", trailingActive = false, breakevenActive = false,
+  onActionSuccess,
 }: PositionActionButtonsProps) {
   console.log(`[UI] PositionActionButtons symbol=${symbol} component=${calledBy}`);
 
@@ -130,6 +133,7 @@ export function PositionActionButtons({
       const data = await res.json() as { ok: boolean; error?: string; message?: string };
       if (data.ok) {
         flash(true, data.message ?? `${meta.label} — request queued`);
+        onActionSuccess?.();
       } else {
         flash(false, data.error ?? "Request failed");
       }

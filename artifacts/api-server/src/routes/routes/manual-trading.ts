@@ -48,8 +48,9 @@ router.post("/manual-trading/order", async (req: Request, res: Response): Promis
     if (side !== "BUY" && side !== "SELL") {
       res.status(400).json({ ok: false, error: "Side must be BUY or SELL" }); return;
     }
-    if (orderType !== "MARKET" && orderType !== "LIMIT") {
-      res.status(400).json({ ok: false, error: "orderType must be MARKET or LIMIT" }); return;
+    const validTypes = ["MARKET", "LIMIT", "TPSL", "TRIGGER", "OCO"];
+    if (!validTypes.includes(orderType)) {
+      res.status(400).json({ ok: false, error: `orderType must be one of: ${validTypes.join(", ")}` }); return;
     }
     if (tpPct !== undefined && (!Number.isFinite(tpPct) || tpPct <= 0 || tpPct > 50)) {
       res.status(400).json({ ok: false, error: "TP percentage must be between 0 and 50" }); return;
@@ -67,8 +68,8 @@ router.post("/manual-trading/order", async (req: Request, res: Response): Promis
       return;
     }
 
-    // ── BUY LIMIT order ──────────────────────────────────────────────────────
-    if (orderType === "LIMIT") {
+    // ── BUY LIMIT / TRIGGER / TPSL / OCO orders (all need a price) ──────────
+    if (orderType === "LIMIT" || orderType === "TRIGGER" || orderType === "TPSL" || orderType === "OCO") {
       if (!limitPrice || !Number.isFinite(limitPrice) || limitPrice <= 0) {
         res.status(400).json({ ok: false, error: "A valid limitPrice is required for LIMIT orders" }); return;
       }

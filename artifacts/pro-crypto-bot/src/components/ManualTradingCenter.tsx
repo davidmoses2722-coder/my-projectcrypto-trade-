@@ -41,7 +41,22 @@ type Candle    = { time: number; open: number; high: number; low: number; close:
 type OBLevel   = [string, string]; // [price, size]
 type OrderSide = "BUY" | "SELL";
 type BottomTab  = "positions" | "orders" | "orderHistory" | "history";
-type OrderType  = "MARKET" | "LIMIT";
+type OrderType  = "MARKET" | "LIMIT" | "TPSL" | "TRIGGER" | "OCO";
+
+interface SpotOrderTypeInfo {
+  key:   OrderType;
+  icon:  string;
+  label: string;
+  desc:  string;
+}
+
+const SPOT_ORDER_TYPES: SpotOrderTypeInfo[] = [
+  { key: "MARKET",  icon: "⚡", label: "Market",  desc: "Executes immediately at best available market price." },
+  { key: "LIMIT",   icon: "📏", label: "Limit",   desc: "Buy or sell at specified or better price." },
+  { key: "TPSL",    icon: "🎯", label: "TP/SL",   desc: "Take Profit / Stop Loss spot execution with preset triggers." },
+  { key: "TRIGGER", icon: "🔀", label: "Trigger", desc: "Executes a market or limit order when preset price is reached." },
+  { key: "OCO",     icon: "📌", label: "OCO",     desc: "One-Cancels-the-Other: combines limit + stop-limit simultaneously." },
+];
 
 interface OpenOrder {
   orderId:           string;
@@ -1131,6 +1146,59 @@ function TradeHistoryPanel({ history, loading }: { history: JournalEntry[]; load
   );
 }
 
+
+// ── SpotOrderTypeModal — BingX-style order type selector ─────────────────────
+
+function SpotOrderTypeModal({
+  currentType,
+  onSelect,
+  onClose,
+}: {
+  currentType: OrderType;
+  onSelect: (t: OrderType) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative w-[340px] bg-[#121418] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+          <span className="text-sm font-bold text-white">Spot Order Type</span>
+          <button onClick={onClose} className="p-1 text-slate-500 hover:text-white rounded transition">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="py-1.5">
+          {SPOT_ORDER_TYPES.map((ot) => {
+            const active = currentType === ot.key;
+            return (
+              <button
+                key={ot.key}
+                onClick={() => { onSelect(ot.key); onClose(); }}
+                className={`w-full flex items-start gap-3 px-5 py-3 transition text-left ${
+                  active ? "bg-cyan-500/10" : "hover:bg-white/[0.04]"
+                }`}
+              >
+                <span className="text-lg mt-0.5 shrink-0">{ot.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold ${active ? "text-cyan-400" : "text-white"}`}>{ot.label}</span>
+                    {active && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-400">Selected</span>}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">{ot.desc}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export function ManualTradingCenter({ prices, status, connection, onRefreshStatus }: Props) {
@@ -1165,6 +1233,10 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
   const [slPct,      setSlPct]      = useState(1.2);
   const [strategy,   setStrategy]   = useState("manual");
   const [showTpSl,   setShowTpSl]   = useState(true);
+  const [showSpotOrderTypeModal, setShowSpotOrderTypeModal] = useState(false);
+  const [triggerPrice, setTriggerPrice] = useState(0);
+  const [ocoLimitPrice, setOcoLimitPrice] = useState(0);
+  const [ocoStopPrice, setOcoStopPrice] = useState(0);
   const [showReview, setShowReview] = useState(false);
   const [busy,       setBusy]       = useState(false);
   const [flash,      setFlash]      = useState<{ ok: boolean; text: string } | null>(null);
@@ -1343,9 +1415,22 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
     setBusy(true);
     setShowReview(false);
     try {
-      const effectiveLimitPrice = orderType === "LIMIT" ? (limitPrice > 0 ? limitPrice : livePrice) : undefined;
-      const body: Record<string, unknown> = { symbol: pair2symbol(pair), side, sizeUsdt, tpPct, slPct, strategy, orderType };
-      if (orderType === "LIMIT" && effectiveLimitPrice) body["limitPrice"] = effectiveLimitPrice;
+      // Map frontend order types to backend-compatible types
+      let backendOrderType = orderType;
+      if (orderType === "TPSL" || orderType === "TRIGGER") backendOrderType = "LIMIT";
+      if (orderType === "OCO") backendOrderType = "LIMIT";
+
+      const effectiveLimitPrice = (backendOrderType === "LIMIT" || orderType === "LIMIT")
+        ? (limitPrice > 0 ? limitPrice : livePrice) : undefined;
+      const body: Record<string, unknown> = {
+        symbol: pair2symbol(pair), side, sizeUsdt, tpPct, slPct, strategy,
+        orderType: backendOrderType,
+        // Pass frontend-specific types as metadata
+        spotOrderType: orderType !== backendOrderType ? orderType : undefined,
+        triggerPrice: (orderType === "TRIGGER" || orderType === "TPSL" || orderType === "OCO") && triggerPrice > 0 ? triggerPrice : undefined,
+        ocoStopPrice: orderType === "OCO" && ocoStopPrice > 0 ? ocoStopPrice : undefined,
+      };
+      if (backendOrderType === "LIMIT" && effectiveLimitPrice) body["limitPrice"] = effectiveLimitPrice;
 
       const r = await fetch(`${SERVER_URL}/api/manual-trading/order`, {
         method: "POST",
@@ -1355,14 +1440,17 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
       const d = await r.json() as { ok?: boolean; error?: string; orderId?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? "Order rejected by server");
 
-      if (orderType === "LIMIT") {
-        showFlash(true, `Limit order placed — ${sym.display} $${sizeUsdt} @ $${fmt(effectiveLimitPrice ?? 0)}`);
+      const typeLabel = SPOT_ORDER_TYPES.find(t => t.key === orderType)?.label ?? orderType;
+      if (backendOrderType === "LIMIT") {
+        showFlash(true, `${typeLabel} order placed — ${sym.display} $${sizeUsdt} @ $${fmt(effectiveLimitPrice ?? 0)}`);
         setTab("orders"); void fetchOpenOrders();
       } else {
         showFlash(true, side === "BUY"
-          ? `BUY queued — ${sym.display} $${sizeUsdt}. Processing through pipeline.`
+          ? `BUY queued — ${sym.display} $${sizeUsdt} (${typeLabel}). Processing through pipeline.`
           : `Close queued — ${sym.display}. Closing at market.`);
       }
+      // Reset dynamic fields after successful order
+      setTriggerPrice(0); setOcoStopPrice(0);
       void onRefreshStatus?.();
     } catch (e) {
       showFlash(false, e instanceof Error ? e.message : String(e));
@@ -1407,6 +1495,13 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
       {confirmAction && (
         <ConfirmModal message={confirmAction.label} confirmLabel="Confirm"
           onConfirm={runConfirm} onCancel={() => setConfirmAction(null)} busy={confirmBusy} />
+      )}
+      {showSpotOrderTypeModal && (
+        <SpotOrderTypeModal
+          currentType={orderType}
+          onSelect={setOrderType}
+          onClose={() => setShowSpotOrderTypeModal(false)}
+        />
       )}
 
       {/* ── Spot / Perp Futures top tabs (BingX reference) ──────────────────── */}
@@ -1653,34 +1748,22 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
 
           <div className="flex flex-col gap-3 px-4 py-3">
 
-            {/* Order type tabs */}
-            <div className="flex gap-0 bg-white/[0.04] rounded-lg p-0.5">
-              <button
-                onClick={() => setOrderType("MARKET")}
-                className={`flex-1 py-1.5 rounded-md text-xs font-black transition ${
-                  orderType === "MARKET" ? "bg-white/10 text-white" : "text-slate-600 hover:text-slate-400"
-                }`}
-              >
-                Market
-              </button>
-              <button
-                onClick={() => { if (side === "BUY") setOrderType("LIMIT"); }}
-                disabled={side === "SELL"}
-                className={`flex-1 py-1.5 rounded-md text-xs font-black transition ${
-                  orderType === "LIMIT"
-                    ? "bg-white/10 text-white"
-                    : side === "SELL"
-                    ? "text-slate-800 cursor-not-allowed"
-                    : "text-slate-600 hover:text-slate-400"
-                }`}
-              >
-                Limit
-              </button>
-              <button disabled className="flex-1 py-1.5 rounded-md text-xs font-black text-slate-800 cursor-not-allowed">Stop</button>
-            </div>
+            {/* Order type selector — BingX style */}
+            <button
+              onClick={() => setShowSpotOrderTypeModal(true)}
+              className="flex items-center justify-between w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 hover:border-white/[0.15] transition"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{SPOT_ORDER_TYPES.find(t => t.key === orderType)?.icon ?? "⚡"}</span>
+                <span className="text-xs font-bold text-white">{SPOT_ORDER_TYPES.find(t => t.key === orderType)?.label ?? orderType}</span>
+              </div>
+              <ChevronDown size={12} className="text-slate-600" />
+            </button>
 
-            {/* Limit price */}
-            {orderType === "LIMIT" && side === "BUY" && (
+            {/* Dynamic inputs based on order type */}
+
+            {/* Limit price — for LIMIT and OCO */}
+            {(orderType === "LIMIT" || orderType === "OCO") && (
               <div>
                 <label className="block text-[10px] text-slate-600 mb-1 uppercase tracking-wider">Limit Price (USDT)</label>
                 <input
@@ -1700,6 +1783,40 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
                     -1% from market
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* Trigger Price — for TRIGGER, TP/SL, and OCO */}
+            {(orderType === "TRIGGER" || orderType === "TPSL" || orderType === "OCO") && (
+              <div>
+                <label className="block text-[10px] text-slate-600 mb-1 uppercase tracking-wider">
+                  {orderType === "TPSL" ? "Trigger Price (USDT)" : "Trigger Price (USDT)"}
+                </label>
+                <input
+                  type="number"
+                  min={0.000001}
+                  step={livePrice > 1000 ? 1 : 0.01}
+                  value={triggerPrice > 0 ? triggerPrice : ""}
+                  placeholder={livePrice > 0 ? `${fmt(livePrice)}` : "Enter trigger price"}
+                  onChange={e => setTriggerPrice(Number(e.target.value) || 0)}
+                  className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white font-mono placeholder:text-slate-700 focus:outline-none focus:border-[#0ea5e9]/40"
+                />
+              </div>
+            )}
+
+            {/* OCO Stop Price — only for OCO */}
+            {orderType === "OCO" && (
+              <div>
+                <label className="block text-[10px] text-[#F6465D] mb-1 uppercase tracking-wider">Stop Price (USDT)</label>
+                <input
+                  type="number"
+                  min={0.000001}
+                  step={livePrice > 1000 ? 1 : 0.01}
+                  value={ocoStopPrice > 0 ? ocoStopPrice : ""}
+                  placeholder={livePrice > 0 ? `${fmt(livePrice * 0.97)}` : "Enter stop price"}
+                  onChange={e => setOcoStopPrice(Number(e.target.value) || 0)}
+                  className="w-full bg-white/[0.04] border border-[#F6465D]/20 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder:text-slate-700 focus:outline-none focus:border-[#F6465D]/40"
+                />
               </div>
             )}
 
@@ -1870,8 +1987,8 @@ export function ManualTradingCenter({ prices, status, connection, onRefreshStatu
               {busy
                 ? "Processing…"
                 : side === "BUY"
-                ? `Open Long — ${sym.display}`
-                : `Close / Sell — ${sym.display}`
+                ? `Buy ${sym.display} — ${SPOT_ORDER_TYPES.find(t => t.key === orderType)?.label ?? orderType}`
+                : `Sell ${sym.display} — Close`
               }
             </button>
 

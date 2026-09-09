@@ -45,6 +45,8 @@ export interface OpenPositionCardProps {
     durationMs:        number;
   };
   children?: React.ReactNode;
+  /** Called after any successful position action so the parent can refresh */
+  onActionSuccess?: () => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +97,7 @@ export function OpenPositionCard({
   calledBy = "unknown",
   liveData,
   children,
+  onActionSuccess,
 }: OpenPositionCardProps) {
   const resolvedPnlUsd = pnlUsd ?? t.pnl ?? 0;
   const resolvedPnlPct = pnlPct ?? t.pnlPercent ?? 0;
@@ -290,6 +293,7 @@ export function OpenPositionCard({
           calledBy={calledBy}
           trailingActive={liveData?.trailingActive}
           breakevenActive={liveData?.breakevenActive}
+          onActionSuccess={onActionSuccess}
         />
       </PremiumCardContent>
     </PremiumCard>

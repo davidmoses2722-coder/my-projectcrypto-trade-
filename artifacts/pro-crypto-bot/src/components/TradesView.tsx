@@ -224,8 +224,9 @@ export function TradesView({ trades, stats, onClose }: TradesViewProps) {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  const openTrades   = trades.filter(t => t.status === "open");
-  const closedTrades = trades.filter(t => t.status === "closed");
+  // Filter: only show truly open positions (status=open AND no exitTime)
+  const openTrades   = trades.filter(t => t.status === "open" && !t.exitTime);
+  const closedTrades = trades.filter(t => t.status === "closed" || t.exitTime);
 
   // ── Auto-switch to positions tab when open trades appear/disappear ────────
   const openCount = openTrades.length;
@@ -407,6 +408,7 @@ export function TradesView({ trades, stats, onClose }: TradesViewProps) {
                   pnlUsd={pnl}
                   pnlPct={pPct}
                   calledBy="TradesView"
+                  onActionSuccess={() => onClose?.(t.id)}
                   liveData={lc ? {
                     trailingActive:  lc.trailingActive,
                     breakevenActive: lc.breakevenActive,

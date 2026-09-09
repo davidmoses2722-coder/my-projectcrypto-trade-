@@ -338,6 +338,7 @@ export interface ServerConfig {
   maxPositionSizePct?: number;
   maxTradesPerDay?: number;
   tradeCooldownMs?: number;
+  leverage?: number;
   riskConfig?: Partial<RiskConfig>;
 }
 

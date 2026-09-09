@@ -333,7 +333,7 @@ export default function App() {
       case "analytics":   return <AnalyticsView prices={prices} />;
       case "backtest":    return <BacktestView />;
       case "portfolio":   return <PortfolioView status={serverBot.status} />;
-      case "trades":      return <TradesView trades={trades} totalPnL={totalPnL} stats={profitStats} />;
+      case "trades":      return <TradesView trades={trades} totalPnL={totalPnL} stats={profitStats} onClose={() => { void serverBot.fetchStatus(); }} />;
       case "manual-trading":
         return (
           <ManualTradingCenter

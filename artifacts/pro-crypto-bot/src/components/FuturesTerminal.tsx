@@ -23,7 +23,7 @@ import { createChart, ColorType, CrosshairMode } from "lightweight-charts";
 
 type PositionSide = "long" | "short";
 type MarginMode = "isolated" | "cross";
-type OrderType = "MARKET" | "LIMIT";
+type OrderType = "MARKET" | "LIMIT" | "TRIGGER" | "TRAILING_STOP" | "POST_ONLY" | "TWAP" | "SCALED" | "CHASE_LIMIT";
 type BottomTab = "positions" | "orders" | "history";
 
 interface FuturesPosition {
@@ -131,6 +131,17 @@ const FUTURES_SYMBOLS = [
 ];
 
 const LEVERAGE_PRESETS = [1, 2, 3, 5, 10, 20, 25, 50, 75, 100, 125];
+
+const ORDER_TYPES: { key: OrderType; label: string; desc: string; icon: string }[] = [
+  { key: "MARKET", label: "Market", desc: "Executes immediately at best available market price.", icon: "⚡" },
+  { key: "LIMIT", label: "Limit", desc: "Buy or sell at specified or better price.", icon: "📏" },
+  { key: "TRIGGER", label: "Trigger", desc: "Triggers a limit or market order when preset price is reached.", icon: "🎯" },
+  { key: "TRAILING_STOP", label: "Trailing Stop", desc: "Automatically executes market order based on market movements.", icon: "🔀" },
+  { key: "POST_ONLY", label: "Post Only", desc: "Places a market maker order (canceled if matching existing order).", icon: "📌" },
+  { key: "TWAP", label: "TWAP", desc: "Places orders at custom intervals over a time window.", icon: "⏱️" },
+  { key: "SCALED", label: "Scaled Order", desc: "Places multiple limit orders within a set price range.", icon: "📊" },
+  { key: "CHASE_LIMIT", label: "Chase Limit", desc: "Automatically adjusts limit price based on best bid/ask.", icon: "🏹" },
+];
 
 const TIMEFRAMES = [
   { label: "1m", value: "1m" },
@@ -310,6 +321,192 @@ function RecentTrades({ trades }: { trades: RecentTrade[] }) {
   );
 }
 
+// ─── Order Type Selector Modal ─────────────────────────────────────────────
+
+function OrderTypeModal({
+  currentType,
+  onSelect,
+  onClose,
+}: {
+  currentType: OrderType;
+  onSelect: (t: OrderType) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative w-[340px] bg-[#121418] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+          <span className="text-sm font-bold text-white">Order Type</span>
+          <button onClick={onClose} className="p-1 text-slate-500 hover:text-white rounded transition">
+            <X size={16} />
+          </button>
+        </div>
+        {/* Options */}
+        <div className="py-1.5">
+          {ORDER_TYPES.map((ot) => {
+            const active = currentType === ot.key;
+            return (
+              <button
+                key={ot.key}
+                onClick={() => { onSelect(ot.key); onClose(); }}
+                className={`w-full flex items-start gap-3 px-5 py-3 transition text-left ${
+                  active ? "bg-cyan-500/10" : "hover:bg-white/[0.04]"
+                }`}
+              >
+                <span className="text-lg mt-0.5 shrink-0">{ot.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold ${active ? "text-cyan-400" : "text-white"}`}>{ot.label}</span>
+                    {active && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-400">Selected</span>}
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">{ot.desc}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Leverage Adjust Modal ─────────────────────────────────────────────────
+
+function LeverageModal({
+  leverageLong,
+  leverageShort,
+  onApplyLong,
+  onApplyShort,
+  onClose,
+}: {
+  leverageLong: number;
+  leverageShort: number;
+  onApplyLong: (v: number) => void;
+  onApplyShort: (v: number) => void;
+  onClose: () => void;
+}) {
+  const [tempLong, setTempLong] = useState(leverageLong);
+  const [tempShort, setTempShort] = useState(leverageShort);
+  const [applyAll, setApplyAll] = useState(false);
+
+  const MAX_LEV = 150;
+  const TICKS = [1, 30, 60, 90, 120, 150];
+
+  const LevSlider = ({
+    value,
+    onChange,
+    color,
+    label,
+  }: {
+    value: number;
+    onChange: (v: number) => void;
+    color: string;
+    label: string;
+  }) => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-bold" style={{ color }}>{label}</span>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => onChange(Math.max(1, value - 1))}
+            className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/[0.1] text-slate-300 hover:bg-white/[0.1] flex items-center justify-center text-sm font-bold transition"
+          >−</button>
+          <span className="w-14 text-center text-xl font-black text-white">{value}x</span>
+          <button
+            onClick={() => onChange(Math.min(MAX_LEV, value + 1))}
+            className="w-7 h-7 rounded-lg bg-white/[0.06] border border-white/[0.1] text-slate-300 hover:bg-white/[0.1] flex items-center justify-center text-sm font-bold transition"
+          >+</button>
+        </div>
+      </div>
+      {/* Slider */}
+      <div className="relative pt-1 pb-5">
+        <input
+          type="range" min={1} max={MAX_LEV} step={1}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style={{
+            background: `linear-gradient(to right, ${color} 0%, ${color} ${(value / MAX_LEV) * 100}%, rgba(255,255,255,0.08) ${(value / MAX_LEV) * 100}%, rgba(255,255,255,0.08) 100%)`,
+          }}
+        />
+        {/* Tick marks */}
+        <div className="absolute bottom-0 left-0 right-0 flex justify-between px-0">
+          {TICKS.map((tick) => (
+            <div key={tick} className="flex flex-col items-center" style={{ position: "absolute", left: `${(tick / MAX_LEV) * 100}%`, transform: "translateX(-50%)" }}>
+              <div className="w-px h-1.5 bg-slate-700" />
+              <span className="text-[9px] text-slate-600 mt-0.5">{tick}x</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const handleOk = () => {
+    onApplyLong(tempLong);
+    onApplyShort(tempShort);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative w-[380px] bg-[#121418] border border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+          <span className="text-sm font-bold text-white">Adjust Leverage</span>
+          <button onClick={onClose} className="p-1 text-slate-500 hover:text-white rounded transition">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-5">
+          {/* Long leverage */}
+          <LevSlider value={tempLong} onChange={setTempLong} color="#10b981" label="Leverage (Long)" />
+
+          {/* Divider */}
+          <div className="border-t border-slate-800" />
+
+          {/* Short leverage */}
+          <LevSlider value={tempShort} onChange={setTempShort} color="#ef4444" label="Leverage (Short)" />
+
+          {/* Max position value */}
+          <div className="text-[11px] text-slate-600 text-center">Max position value: 100,000,000 USDT</div>
+
+          {/* Apply to all pairs */}
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] text-slate-400">Apply to all pairs</span>
+            <button
+              onClick={() => setApplyAll(v => !v)}
+              className={`relative w-10 h-5 rounded-full transition ${applyAll ? "bg-cyan-500" : "bg-slate-700"}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${applyAll ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 pb-4">
+          <button
+            onClick={handleOk}
+            className="w-full py-2.5 rounded-xl bg-[#3b82f6] hover:bg-[#2563eb] text-white text-sm font-bold transition"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Props) {
@@ -337,6 +534,13 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
   const [leverage, setLeverage] = useState(20);
   const [orderType, setOrderType] = useState<OrderType>("MARKET");
   const [limitPrice, setLimitPrice] = useState(0);
+  const [twapSlices, setTwapSlices] = useState(5);
+  const [twapInterval, setTwapInterval] = useState(10);
+  const [scaledMinPrice, setScaledMinPrice] = useState(0);
+  const [scaledMaxPrice, setScaledMaxPrice] = useState(0);
+  const [scaledNumOrders, setScaledNumOrders] = useState(5);
+  const [chaseOffsetTicks, setChaseOffsetTicks] = useState(1);
+  const [trailingOffsetPct, setTrailingOffsetPct] = useState(1);
   const [amountUsdt, setAmountUsdt] = useState(0);
   const [showTpSl, setShowTpSl] = useState(true);
   const [tpTrigger, setTpTrigger] = useState(0);
@@ -346,6 +550,11 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
   const [showMarkets, setShowMarkets] = useState(true);
+  const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
+  const [showLeverageModal, setShowLeverageModal] = useState(false);
+  const [leverageLong, setLeverageLong] = useState(20);
+  const [leverageShort, setLeverageShort] = useState(20);
+  const [applyToAllPairs, setApplyToAllPairs] = useState(false);
 
   // ── Chart state ────────────────────────────────────────────────────────
   const [candles, setCandles] = useState<FuturesCandle[]>([]);
@@ -356,13 +565,18 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
   const volSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const lastCandleTimeRef = useRef<number>(0);
   const positionPriceLineRefs = useRef<Map<string, IPriceLine>>(new Map());
+  const orderPriceLineRefs = useRef<Map<string, IPriceLine>>(new Map());
 
   // ── localStorage helpers for paper positions ──────────────────────────
   const FUTURES_POS_KEY = "pcb_futures_positions";
   const loadPersistedPositions = useCallback((): FuturesPosition[] => {
     try {
       const raw = localStorage.getItem(FUTURES_POS_KEY);
-      if (raw) return JSON.parse(raw) as FuturesPosition[];
+      if (raw) {
+        const parsed = JSON.parse(raw) as FuturesPosition[];
+        // Filter: only return positions with active contracts (> 0)
+        return parsed.filter(p => Number(p.contracts) > 0);
+      }
     } catch { /* ignore */ }
     return [];
   }, []);
@@ -402,7 +616,7 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
     return positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
   }, [positions]);
 
-  const canTrade = cap?.supported === true;
+  const canTrade = isPaper || cap?.supported === true;
 
   // ── API fetchers ────────────────────────────────────────────────────────
   const fetchCapability = useCallback(async () => {
@@ -459,19 +673,40 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
   }, []);
 
   const fetchPositions = useCallback(async () => {
-    if (!canTrade) { setPositions([]); return; }
+    // In paper mode, always fetch positions from the backend paper engine
+    // In live mode, only fetch if exchange capability is confirmed
+    if (!isPaper && !canTrade) { setPositions([]); return; }
     try {
       const r = await fetch(`${SERVER_URL}/api/futures/positions`, { headers: authHeaders() as HeadersInit });
-      const d = await r.json() as { ok?: boolean; positions?: FuturesPosition[] };
-      setPositions(d.positions ?? []);
+      const d = await r.json() as { ok?: boolean; paper?: boolean; positions?: FuturesPosition[] };
+      if (d.ok !== false) {
+        // Filter: only keep positions with active contracts (size > 0)
+        setPositions((d.positions ?? []).filter(p => p.contracts > 0));
+      }
     } catch { /* leave last-known */ }
-  }, [canTrade]);
+  }, [canTrade, isPaper]);
 
   const fetchOrders = useCallback(async () => {
     try {
       const r = await fetch(`${SERVER_URL}/api/futures/orders`, { headers: authHeaders() as HeadersInit });
-      const d = await r.json() as { ok?: boolean; orders?: FuturesOrderRow[] };
-      setOrders(d.orders ?? []);
+      const d = await r.json() as { ok?: boolean; orders?: Array<Record<string, unknown>> };
+      // Normalize paper engine order format to FuturesOrderRow
+      const normalized: FuturesOrderRow[] = (d.orders ?? []).map((o: Record<string, unknown>) => ({
+        orderId: String(o.orderId ?? o.id ?? ""),
+        symbol: String(o.symbol ?? ""),
+        side: String(o.side ?? "").toUpperCase(),
+        orderType: String(o.orderType ?? o.type ?? "").toUpperCase(),
+        limitPrice: o.limitPrice != null ? String(o.limitPrice) : o.price != null ? String(o.price) : null,
+        quantity: String(o.quantity ?? o.amount ?? ""),
+        status: String(o.status ?? ""),
+        positionSide: o.positionSide != null ? String(o.positionSide) : null,
+        leverage: o.leverage != null ? Number(o.leverage) : null,
+        marginMode: o.marginMode != null ? String(o.marginMode) : null,
+        reduceOnly: Boolean(o.reduceOnly),
+        filledAt: o.filledAt != null ? String(o.filledAt) : null,
+        createdAt: String(o.createdAt ?? ""),
+      }));
+      setOrders(normalized);
     } catch { /* leave last-known */ }
   }, []);
 
@@ -557,6 +792,23 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
     chartRef.current?.timeScale().scrollToRealTime();
   }, [candles]);
 
+  // ── Sync leverage with position side
+  useEffect(() => {
+    setLeverage(positionSide === "long" ? leverageLong : leverageShort);
+  }, [positionSide, leverageLong, leverageShort]);
+
+  // ── Close modals on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowOrderTypeModal(false);
+        setShowLeverageModal(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // ── Persist positions to localStorage ────────────────────────────────
   useEffect(() => { persistPositions(positions); }, [positions, persistPositions]);
 
@@ -603,6 +855,75 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
     }
   }, [positions, selectedSymbol]);
 
+  // ── Order price lines on chart (Limit, Trigger, TP, SL) ──────────────────
+  useEffect(() => {
+    if (!candleSeriesRef.current) return;
+    const cs = candleSeriesRef.current;
+    const existing = orderPriceLineRefs.current;
+
+    // Remove all existing order lines
+    for (const [key, pl] of existing) {
+      try { cs.removePriceLine(pl); } catch { /* already removed */ }
+    }
+    existing.clear();
+
+    // Add lines for pending open orders on the current symbol
+    const base = selectedSymbol.split("/")[0] ?? selectedSymbol.split("_")[0] ?? selectedSymbol;
+    for (const order of orders) {
+      if (order.status !== "open") continue;
+      if (!order.symbol.includes(base) && order.symbol !== selectedSymbol) continue;
+
+      const price = Number(order.limitPrice ?? 0);
+      if (price <= 0) continue;
+
+      const isBuy = order.side.toUpperCase() === "BUY";
+      const type = order.orderType?.toUpperCase() ?? "";
+
+      let color = "#64748b"; // default slate
+      let title = type;
+      let lineStyle = 0; // solid
+
+      if (type === "LIMIT") {
+        color = isBuy ? "#0ECB81" : "#F6465D";
+        title = `${isBuy ? "Buy" : "Sell"} Limit`;
+      } else if (type === "TRIGGER") {
+        color = "#f59e0b"; // amber
+        title = "Trigger";
+        lineStyle = 2; // dotted
+      } else if (type === "POST_ONLY") {
+        color = "#8b5cf6"; // violet
+        title = "Post Only";
+      } else if (type === "CHASE_LIMIT") {
+        color = "#06b6d4"; // cyan
+        title = "Chase";
+        lineStyle = 1; // dashed
+      } else if (type === "TRAILING_STOP") {
+        color = "#f59e0b";
+        title = "Trail Stop";
+        lineStyle = 2;
+      } else if (type === "TWAP") {
+        color = "#3b82f6"; // blue
+        title = "TWAP";
+        lineStyle = 1;
+      } else if (type === "SCALED") {
+        color = "#10b981"; // emerald
+        title = "Scaled";
+        lineStyle = 1;
+      }
+
+      const key = `order_${order.orderId}`;
+      const pl = cs.createPriceLine({
+        price,
+        color,
+        lineWidth: 1,
+        lineStyle,
+        axisLabelVisible: true,
+        title,
+      } as PriceLineOptions);
+      existing.set(key, pl);
+    }
+  }, [orders, selectedSymbol]);
+
   // ── SSE ─────────────────────────────────────────────────────────────────
   useSSE((event) => {
     if (event.type === "position:open" || event.type === "position:close" || event.type === "position:update" || event.type === "order:created" || event.type === "order:update") {
@@ -636,9 +957,43 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
         leverage,
         marginMode,
       };
-      if (orderType === "LIMIT") body["limitPrice"] = limitPrice;
+
+      // Pass price for limit-type orders
+      if (["LIMIT", "POST_ONLY", "CHASE_LIMIT", "TWAP", "SCALED"].includes(orderType)) {
+        if (limitPrice > 0) body["limitPrice"] = limitPrice;
+      }
+
+      // TP/SL
       if (showTpSl && tpTrigger > 0) body["tpPrice"] = tpTrigger;
       if (showTpSl && slTrigger > 0) body["slPrice"] = slTrigger;
+
+      // Advanced order type fields
+      if (orderType === "TRIGGER") {
+        body["triggerPrice"] = limitPrice > 0 ? limitPrice : currentPrice;
+        body["triggerDirection"] = side === "long" ? "above" : "below";
+      }
+      if (orderType === "TRAILING_STOP") {
+        body["trailingActivationPrice"] = limitPrice > 0 ? limitPrice : currentPrice;
+        body["trailingOffsetPct"] = trailingOffsetPct > 0 ? trailingOffsetPct : 1;
+      }
+      if (orderType === "TWAP") {
+        body["twapNumSlices"] = twapSlices;
+        body["twapIntervalSec"] = twapInterval;
+        body["limitPrice"] = limitPrice > 0 ? limitPrice : currentPrice;
+      }
+      if (orderType === "SCALED") {
+        body["scaledMinPrice"] = scaledMinPrice;
+        body["scaledMaxPrice"] = scaledMaxPrice;
+        body["scaledNumOrders"] = scaledNumOrders;
+      }
+      if (orderType === "CHASE_LIMIT") {
+        body["chaseOffsetTicks"] = chaseOffsetTicks;
+        body["limitPrice"] = limitPrice > 0 ? limitPrice : currentPrice;
+      }
+      if (orderType === "POST_ONLY") {
+        body["postOnly"] = true;
+        body["limitPrice"] = limitPrice > 0 ? limitPrice : currentPrice;
+      }
 
       const r = await fetch(`${SERVER_URL}/api/futures/order`, {
         method: "POST",
@@ -650,9 +1005,10 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
 
       const modeLabel = d.paper ? "Paper" : "Live";
       const sideLabel = side === "long" ? "LONG" : "SHORT";
-      showFlash(true, `Position Opened: ${modeLabel} ${sideLabel} ${selectedSymbol} @ $${fmt(currentPrice)} (${leverage}x · $${fmt(amountUsdt)} margin)`);
+      const typeLabel = ORDER_TYPES.find(t => t.key === orderType)?.label ?? orderType;
+      showFlash(true, `${typeLabel} Order: ${modeLabel} ${sideLabel} ${selectedSymbol} @ $${fmt(currentPrice)} (${leverage}x · $${fmt(amountUsdt)} margin)`);
 
-      // Refresh positions, orders, account from the backend (which handles paper + live)
+      // Refresh positions, orders, account from the backend
       void fetchPositions();
       void fetchOrders();
       void fetchAccount();
@@ -676,6 +1032,12 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
       });
       const d = await r.json() as { ok?: boolean; error?: string };
       if (!d.ok) throw new Error(d.error ?? "Close failed");
+      // Immediately remove the closed position from local state
+      setPositions(prev => prev.filter(p => !(p.symbol === pos.symbol && p.side === pos.side)));
+      // Clear the localStorage cache so stale cards don't persist across reloads
+      try {
+        localStorage.removeItem(FUTURES_POS_KEY);
+      } catch { /* ignore */ }
       showFlash(true, `Closed ${pos.symbol} ${pos.side.toUpperCase()}.`);
       void fetchPositions();
       void fetchOrders();
@@ -820,31 +1182,87 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
                   className="py-1.5 rounded text-[11px] font-black bg-white/[0.04] border border-white/[0.08] text-slate-300 capitalize hover:border-white/[0.15] transition">
                   {marginMode}
                 </button>
-                <select value={leverage} onChange={e => setLeverage(Number(e.target.value))}
-                  className="py-1.5 rounded text-[11px] font-black bg-white/[0.04] border border-white/[0.08] text-slate-300 text-center appearance-none cursor-pointer">
-                  {LEVERAGE_PRESETS.map(l => <option key={l} value={l}>{l}x</option>)}
-                </select>
-              </div>
-
-              {/* Market/Limit toggle */}
-              <div className="flex gap-0 bg-white/[0.04] rounded p-0.5">
-                <button onClick={() => setOrderType("MARKET")}
-                  className={`flex-1 py-1 rounded text-[11px] font-black transition ${orderType === "MARKET" ? "bg-white/10 text-white" : "text-slate-600 hover:text-slate-400"}`}>
-                  Market
-                </button>
-                <button onClick={() => setOrderType("LIMIT")}
-                  className={`flex-1 py-1 rounded text-[11px] font-black transition ${orderType === "LIMIT" ? "bg-white/10 text-white" : "text-slate-600 hover:text-slate-400"}`}>
-                  Limit
+                <button onClick={() => setShowLeverageModal(true)}
+                  className="py-1.5 rounded text-[11px] font-black bg-white/[0.04] border border-white/[0.08] text-cyan-400 text-center hover:border-cyan-500/30 transition">
+                  {leverage}x ⚙
                 </button>
               </div>
 
-              {/* Limit price */}
-              {orderType === "LIMIT" && (
+              {/* Order Type selector */}
+              <button onClick={() => setShowOrderTypeModal(true)}
+                className="w-full flex items-center justify-between py-1.5 rounded px-2.5 bg-white/[0.04] border border-white/[0.08] hover:border-cyan-500/30 transition">
+                <span className="text-[11px] text-slate-600">Order Type</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-black text-white">{ORDER_TYPES.find(t => t.key === orderType)?.label ?? orderType}</span>
+                  <ChevronDown size={12} className="text-slate-500" />
+                </div>
+              </button>
+
+              {/* Limit price / Trigger / Offset */}
+              {(orderType === "LIMIT" || orderType === "TRIGGER" || orderType === "CHASE_LIMIT" || orderType === "POST_ONLY" || orderType === "TWAP") && (
                 <div>
-                  <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Limit Price</label>
+                  <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">
+                    {orderType === "TRIGGER" ? "Trigger Price" : orderType === "CHASE_LIMIT" ? "Offset (Ticks)" : "Limit Price"}
+                  </label>
                   <input type="number" value={limitPrice > 0 ? limitPrice : ""} placeholder={currentPrice > 0 ? fmt(currentPrice) : "Price"}
                     onChange={e => setLimitPrice(Number(e.target.value) || 0)}
                     className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                </div>
+              )}
+
+              {/* Trailing Stop offset */}
+              {orderType === "TRAILING_STOP" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Activation Price</label>
+                    <input type="number" value={limitPrice > 0 ? limitPrice : ""} placeholder={currentPrice > 0 ? fmt(currentPrice) : "Price"}
+                      onChange={e => setLimitPrice(Number(e.target.value) || 0)}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Trail Offset %</label>
+                    <input type="number" min={0.1} step={0.1} value={trailingOffsetPct} onChange={e => setTrailingOffsetPct(Math.max(0.1, Number(e.target.value) || 0.1))}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
+                </div>
+              )}
+
+              {/* TWAP settings */}
+              {orderType === "TWAP" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Slices</label>
+                    <input type="number" min={2} max={50} value={twapSlices} onChange={e => setTwapSlices(Math.max(2, Math.min(50, Number(e.target.value) || 2)))}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Interval (sec)</label>
+                    <input type="number" min={1} max={3600} value={twapInterval} onChange={e => setTwapInterval(Math.max(1, Math.min(3600, Number(e.target.value) || 1)))}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
+                </div>
+              )}
+
+              {/* Scaled Order settings */}
+              {orderType === "SCALED" && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Min Price</label>
+                    <input type="number" value={scaledMinPrice > 0 ? scaledMinPrice : ""} placeholder="Min"
+                      onChange={e => setScaledMinPrice(Number(e.target.value) || 0)}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Max Price</label>
+                    <input type="number" value={scaledMaxPrice > 0 ? scaledMaxPrice : ""} placeholder="Max"
+                      onChange={e => setScaledMaxPrice(Number(e.target.value) || 0)}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 mb-0.5 uppercase tracking-wider">Orders</label>
+                    <input type="number" min={2} max={20} value={scaledNumOrders} onChange={e => setScaledNumOrders(Math.max(2, Math.min(20, Number(e.target.value) || 2)))}
+                      className="w-full bg-white/[0.04] border border-white/[0.08] rounded px-2 py-1.5 text-[11px] text-white font-mono focus:outline-none focus:border-cyan-500/40" />
+                  </div>
                 </div>
               )}
 
@@ -941,7 +1359,7 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
               </div>
 
               <div className="text-[9px] text-slate-700 text-center mt-1">
-                {isPaper ? "Paper" : "Gate.io"} Futures · {marginMode} · {leverage}x
+                {isPaper ? "Paper" : "Gate.io"} Futures · {marginMode} · {leverage}x · {ORDER_TYPES.find(t => t.key === orderType)?.label ?? orderType}
               </div>
               </div>
             </div>
@@ -976,7 +1394,7 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
           {bottomTab === "positions" ? (
             positions.length === 0 ? (
               <div className="py-6 text-center text-slate-700 text-xs">
-                {canTrade ? "No open futures positions." : "Connect futures-enabled keys to see positions."}
+                {isPaper ? "No open paper positions. Place a trade to see positions here." : canTrade ? "No open futures positions." : "Connect futures-enabled keys to see live positions."}
               </div>
             ) : (
               <table className="w-full text-[11px]">
@@ -1113,6 +1531,26 @@ export function FuturesTerminal({ symbol, prices, isPaper, onRefreshStatus }: Pr
           )}
         </div>
       </div>
+
+      {/* Order Type Selector Modal */}
+      {showOrderTypeModal && (
+        <OrderTypeModal
+          currentType={orderType}
+          onSelect={setOrderType}
+          onClose={() => setShowOrderTypeModal(false)}
+        />
+      )}
+
+      {/* Leverage Adjust Modal */}
+      {showLeverageModal && (
+        <LeverageModal
+          leverageLong={leverageLong}
+          leverageShort={leverageShort}
+          onApplyLong={setLeverageLong}
+          onApplyShort={setLeverageShort}
+          onClose={() => setShowLeverageModal(false)}
+        />
+      )}
     </div>
   );
 }
