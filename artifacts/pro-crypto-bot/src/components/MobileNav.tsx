@@ -1,4 +1,4 @@
-import { Activity, Target, BarChart2, ClipboardList, Bot, Microscope, Beaker, Briefcase, ShieldAlert, Key, TrendingUp, BrainCircuit, Copy, ArrowUpDown, BookOpen } from "lucide-react";
+import { Activity, Target, BarChart2, ClipboardList, Bot, Microscope, Beaker, Briefcase, ShieldAlert, Key, TrendingUp, BrainCircuit, Copy, ArrowUpDown, BookOpen, Home } from "lucide-react";
 
 interface MobileNavProps {
   activeTab: string;
@@ -53,6 +53,7 @@ export function MobileNav({ activeTab, onTabChange, isBotRunning }: MobileNavPro
 
 // ── Mobile More Menu (for tabs not in bottom nav) ────────────────────────────
 const MORE_TABS = [
+  { id: "bingx-home",   label: "BingX Home", icon: Home },
   { id: "signals",    label: "Signals",    icon: Target },
   { id: "orderbook",  label: "Order Book", icon: BarChart2 },
   { id: "analytics",  label: "Analytics",  icon: Microscope },

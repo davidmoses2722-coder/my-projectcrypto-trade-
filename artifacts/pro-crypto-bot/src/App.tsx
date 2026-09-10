@@ -16,6 +16,7 @@ import { MobileNav, MobileMoreMenu } from "./components/MobileNav";
 import { LoginScreen }      from "./components/LoginScreen";
 import { MobileDashboard }  from "./components/MobileDashboard";
 import { Dashboard }        from "./components/Dashboard";
+import BingXHomeDashboard from "./components/BingXHomeDashboard";
 import { SignalsView }      from "./components/SignalsView";
 import { PortfolioView }    from "./components/PortfolioView";
 import { TradesView }       from "./components/TradesView";
@@ -298,6 +299,9 @@ export default function App() {
     switch (activeTab) {
 
       // ── Dashboard ──────────────────────────────────────────────────────────
+      case "bingx-home":
+        return <BingXHomeDashboard />;
+
       case "dashboard":
         if (isMobile) {
           return (
