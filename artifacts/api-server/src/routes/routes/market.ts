@@ -13,7 +13,72 @@ import { logger } from "../../lib/logger";
 
 const router = Router();
 
+/** Gate.io public ticker shape (matches api.gateio.ws/api/v4/spot/tickers) */
+interface GateTicker {
+  currency_pair: string;
+  last: string;
+  change_percentage: string;
+  base_volume: string;
+  quote_volume: string;
+  high_24h?: string;
+  low_24h?: string;
+}
+
 const GATE_TICKERS = "https://api.gateio.ws/api/v4/spot/tickers";
+
+/** GET /api/market/tradfi — TradFi/Stock tickers (stocks, gold, indices)
+ * Filters Gate.io USDT pairs to clean stock/gold/commodity tokens.
+ */
+router.get("/market/tradfi", (_req, res) => {
+  https.get(GATE_TICKERS, { headers: { Accept: "application/json" } }, (upstream) => {
+    const chunks: Buffer[] = [];
+    upstream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    upstream.on("end", () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      if ((upstream.statusCode ?? 500) >= 400) {
+        res.status(upstream.statusCode ?? 502).json({ error: "Gate.io unreachable" });
+        return;
+      }
+      try {
+        const all = JSON.parse(body) as GateTicker[];
+        const tradfiMap: Record<string, GateTicker> = {};
+        const wantedBases = new Set([
+          // Clean US stock tokens (Gate.io naming: base + G/ON/X suffix)
+          "AAPLG","TSLAG","TSLAON","AMZNG","AMZNON","AMZNX","AMDG","AMDON",
+          "AVGOON","AVGOX","CATG","BACG","BRKBG","BABAON","GOOGL","MSFT",
+          "META","NVDA","JPM","GS","PLTR","SNOW","COIN","SOFI","UBER","LYFT",
+          "AAPL","TSLA","AMZN","AMD","AVGO","CAT","BAC","BRKB","BABA","GOOG",
+          "MSFT","META","NVDA","JPM","GS","PLTR","SNOW","COIN","SOFI","UBER","LYFT",
+          // 금 (Tether Gold)
+          "XAUT",
+          // 지수 ETF 계열 ( leveraged tokens from Gate.io )
+          "SPX","QQQ","IWM","GLD","SLV",
+          // Crypto ETFs
+          "BITO","IBIT","FBTC",
+        ]);
+        for (const t of all) {
+          if (!t.currency_pair.endsWith("_USDT") || Number(t.last) <= 0) continue;
+          const base = t.currency_pair.split("_")[0];
+          if (wantedBases.has(base) || wantedBases.has(base.replace(/G$|ON$|X$/, ""))) {
+            const key = base.replace(/G$|ON$|X$/, "");
+            if (!tradfiMap[key] || Number(t.last) > Number(tradfiMap[key].last)) {
+              tradfiMap[key] = t;
+            }
+          }
+        }
+        // Mark XAUT as gold
+        const goldEntry = tradfiMap["XAUT"];
+        if (goldEntry) {
+          goldEntry.currency_pair = "XAU_USDT";
+        }
+        res.json(Object.values(tradfiMap));
+      } catch (e) {
+        res.status(502).json({ error: "Invalid Gate.io response" });
+      }
+    });
+    upstream.on("error", () => res.status(502).json({ error: "Gate.io stream failed" }));
+  }).on("error", () => res.status(502).json({ error: "Gate.io unreachable" }));
+});
 
 /** GET /api/market/tickers — proxies Gate.io spot tickers, no auth required */
 router.get("/market/tickers", (_req, res) => {

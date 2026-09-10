@@ -300,7 +300,21 @@ export default function App() {
 
       // ── Dashboard ──────────────────────────────────────────────────────────
       case "bingx-home":
-        return <BingXHomeDashboard />;
+        return (
+          <BingXHomeDashboard
+            onBottomNavChange={(tabId) => {
+              const routeMap: Record<string, string> = {
+                home:    "bingx-home",
+                markets: "orderbook",
+                trade:   "manual-trading",
+                tradfi:  "dashboard",
+                assets:  "portfolio",
+              };
+              handleTabChange(routeMap[tabId] ?? "bingx-home");
+            }}
+            activeBottomTab="home"
+          />
+        );
 
       case "dashboard":
         if (isMobile) {
@@ -433,16 +447,18 @@ export default function App() {
         />
       </div>
 
-      {/* ── MOBILE header (hidden on desktop) ────────────────────────── */}
-      <MobileHeader
-        isBotRunning={isBotRunning}
-        connectionStatus={connectionStatus}
-        fearGreedIndex={fearGreedIndex}
-        onLock={lock}
-        onMore={() => setShowMore(true)}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-      />
+      {/* ── MOBILE header (hidden on desktop & hidden in BingX Home mode to avoid double-navbar) ─── */}
+      {activeTab !== "bingx-home" && (
+        <MobileHeader
+          isBotRunning={isBotRunning}
+          connectionStatus={connectionStatus}
+          fearGreedIndex={fearGreedIndex}
+          onLock={lock}
+          onMore={() => setShowMore(true)}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+      )}
 
       {/* ── Mobile more menu overlay ─────────────────────────────────── */}
       {showMore && (
