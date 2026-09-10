@@ -1,28 +1,422 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { CoinPrice, Signal, Trade, PortfolioAsset } from "../types/crypto";
-import { PriceCard } from "./PriceCard";
 import { SignalCard } from "./SignalCard";
-import { MarketOverview } from "./MarketOverview";
-import { SERVER_URL } from "../config/urls";
-import { PositionActionButtons } from "./PositionActionButtons";
 import { OpenPositionCard } from "./OpenPositionCard";
-import { useAnalytics } from "../hooks/useAnalytics";
-import { PremiumStatCard } from "./premium/PremiumStatCard";
-import { StatusBadge } from "./premium/StatusBadge";
 import { PremiumCard, PremiumCardContent } from "./premium/PremiumCard";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ReferenceLine,
-} from "recharts";
-import { Wallet, Activity, Target, BarChart2, Bot, Server, Wifi, TrendingUp, TrendingDown, Microscope } from "lucide-react";
+import { StatusBadge } from "./premium/StatusBadge";
+import { TrendingUp, TrendingDown, ChevronRight, Search, Headphones, Gift, Bell, Flame, Hash } from "lucide-react";
 
-// ─── Props ────────────────────────────────────────────────────────────────────
+// ── BingX-style icons (inline SVGs, no lucide dependency) ─────────────────────
+function HomeIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  );
+}
+function MarketsIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M18 17V9" />
+      <path d="M13 17V5" />
+      <path d="M8 17v-3" />
+    </svg>
+  );
+}
+function TradeIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 3h5v5" />
+      <path d="M4 20 21 3" />
+      <path d="M21 16v5h-5" />
+      <path d="M15 15l6 6" />
+      <path d="M4 8l6 6" />
+    </svg>
+  );
+}
+function TradFiIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="8" width="20" height="12" rx="2" />
+      <path d="M6 12h4" />
+      <path d="M2 12h2" />
+    </svg>
+  );
+}
+function AssetsIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M2 10h20" />
+    </svg>
+  );
+}
+function ExchangeIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 0 1 0 4H8" />
+      <path d="M12 18V6" />
+    </svg>
+  );
+}
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function fmtPrice(price: number): string {
+  if (price >= 1000) return price.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (price >= 1) return price.toFixed(2);
+  return price.toFixed(4);
+}
+
+function PriceBadge({ change }: { change: number }) {
+  const isUp = change >= 0;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-bold ${isUp ? "text-emerald-400" : "text-rose-400"}`}>
+      {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+      {Math.abs(change).toFixed(2)}%
+    </span>
+  );
+}
+
+// ── Mock hot tickers (supplemented by live prices if available) ───────────────
+const BINGX_HOT_TICKERS = [
+  { id: "btc", base: "BTC", name: "Bitcoin", price: 0, change24h: 0, color: "#f7931a", headline: "Market momentum building" },
+  { id: "eth", base: "ETH", name: "Ethereum", price: 0, change24h: 0, color: "#627eea", headline: "ETF inflow steady" },
+  { id: "gold", base: "GOLD", name: "Gold Spot", price: 0, change24h: 0, color: "#d4af37", headline: "Safe-haven demand up" },
+  { id: "brent", base: "OIL", name: "Brent Crude", price: 0, change24h: 0, color: "#3b82f6", headline: "Supply concerns persist" },
+];
+
+const BINGX_ASSETS = [
+  { id: "btc", base: "BTC", name: "Bitcoin", price: 0, change24h: 0 },
+  { id: "eth", base: "ETH", name: "Ethereum", price: 0, change24h: 0 },
+  { id: "sol", base: "SOL", name: "Solana", price: 0, change24h: 0 },
+  { id: "bnb", base: "BNB", name: "BNB", price: 0, change24h: 0 },
+  { id: "xrp", base: "XRP", name: "XRP", price: 0, change24h: 0 },
+  { id: "ada", base: "ADA", name: "Cardano", price: 0, change24h: 0 },
+  { id: "doge", base: "DOGE", name: "Dogecoin", price: 0, change24h: 0 },
+  { id: "link", base: "LINK", name: "Chainlink", price: 0, change24h: 0 },
+  { id: "dot", base: "DOT", name: "Polkadot", price: 0, change24h: 0 },
+  { id: "avax", base: "AVAX", name: "Avalanche", price: 0, change24h: 0 },
+  { id: "matic", base: "MATIC", name: "Polygon", price: 0, change24h: 0 },
+  { id: "atom", base: "ATOM", name: "Cosmos", price: 0, change24h: 0 },
+];
+
+// ── Bottom Navigation ──────────────────────────────────────────────────────────
+const BOTTOM_TABS = [
+  { id: "home",   label: "Home",   icon: HomeIcon, active: true },
+  { id: "markets", label: "Markets", icon: MarketsIcon },
+  { id: "trade",   label: "Trade",   icon: TradeIcon },
+  { id: "tradfi",  label: "TradFi",  icon: TradFiIcon },
+  { id: "assets",  label: "Assets",  icon: AssetsIcon },
+];
+
+// ── Top Header ─────────────────────────────────────────────────────────────────
+function BingXHeader() {
+  return (
+    <header className="bg-[#0b0e11] sticky top-0 z-40 border-b border-[#1e2329]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/* Profile avatar */}
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#2b6be8] to-[#6366f1] flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-md">
+          J
+        </div>
+
+        {/* Scrollable ticker search bar */}
+        <div className="flex-1 relative overflow-hidden">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            placeholder="Search BTC, ETH..."
+            defaultValue="BTC/USDT"
+            className="w-full bg-[#181a20] rounded-xl py-2 pl-9 pr-4 text-sm text-slate-300 placeholder-slate-600 border border-[#2a2f3a] focus:outline-none focus:border-[#2b6be8] transition-colors"
+          />
+        </div>
+
+        {/* Action icons */}
+        <button className="w-9 h-9 rounded-xl bg-[#181a20] flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262f] border border-[#2a2f3a] transition-all">
+          <Headphones size={18} />
+        </button>
+        <button className="w-9 h-9 rounded-xl bg-[#181a20] flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262f] border border-[#2a2f3a] transition-all relative">
+          <Gift size={18} />
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#f59e0b] text-[9px] font-bold text-white flex items-center justify-center shadow-md">3</span>
+        </button>
+        <button className="w-9 h-9 rounded-xl bg-[#181a20] flex items-center justify-center text-slate-400 hover:text-white hover:bg-[#22262f] border border-[#2a2f3a] transition-all relative">
+          <Bell size={18} />
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-rose-500 text-[9px] font-bold text-white flex items-center justify-center shadow-md">5</span>
+        </button>
+      </div>
+
+      {/* Scrolling hot ticker bar */}
+      <div className="overflow-hidden border-t border-[#1e2329] bg-[#0b0e11]">
+        <div className="flex items-center gap-8 px-4 py-1.5 text-xs font-bold animate-ticker hover:[animation-play-state:paused]">
+          {BINGX_HOT_TICKERS.map((t) => (
+            <span key={t.id} className="whitespace-nowrap">
+              <span className="text-slate-400 mr-1">{t.base}</span>
+              <span className="text-slate-200">${fmtPrice(t.price || 0)}</span>
+            </span>
+          ))}
+          {BINGX_HOT_TICKERS.map((t) => (
+            <span key={`dup-${t.id}`} className="whitespace-nowrap">
+              <span className="text-slate-400 mr-1">{t.base}</span>
+              <span className="text-slate-200">${fmtPrice(t.price || 0)}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// ── Promotional Banner ─────────────────────────────────────────────────────────
+function PromoBanner({ onCTAClick }: { onCTAClick?: () => void }) {
+  return (
+    <div className="bg-gradient-to-r from-[#1e3a8a] to-[#2b6be8] rounded-2xl p-4 mb-4 flex items-center justify-between text-white shadow-lg shadow-blue-500/10 border border-blue-400/20">
+      <div>
+        <p className="text-[13px] font-bold text-blue-200 uppercase tracking-wider mb-0.5">Limited Offer</p>
+        <p className="text-white font-black text-base leading-tight">Get 50 USDT welcome bonus</p>
+        <p className="text-blue-200 text-xs mt-1">Deposit now and start trading</p>
+      </div>
+      <button
+        onClick={onCTAClick}
+        className="bg-white text-[#2b6be8] font-bold px-5 py-2.5 rounded-xl text-sm hover:bg-blue-50 transition-colors shadow-lg shrink-0"
+      >
+        Trade Now
+      </button>
+    </div>
+  );
+}
+
+// ── Quick Actions Bar ──────────────────────────────────────────────────────────
+const QUICK_ACTIONS = [
+  { id: "p2p",  label: "P2P Trading", icon: ExchangeIcon, badge: "", badgeColor: "" },
+  { id: "rewards", label: "Rewards Hub", icon: Gift, badge: "", badgeColor: "" },
+  { id: "superx", label: "SuperX", icon: Flame, badge: "HOT", badgeColor: "bg-rose-500" },
+  { id: "copy",  label: "Copy Trading", icon: Hash, badge: "", badgeColor: "" },
+  { id: "referral", label: "Referral", icon: TrendingUp, badge: "", badgeColor: "" },
+];
+
+function QuickActionsRow() {
+  return (
+    <div className="mb-5">
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-1 px-1">
+        {QUICK_ACTIONS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div
+              key={item.id}
+              className="flex-shrink-0 w-[90px] bg-[#121418] rounded-2xl p-3 border border-[#1e2329] hover:border-[#2b6be8]/40 transition-all flex flex-col items-center gap-2 group"
+            >
+              <div className="w-12 h-12 rounded-xl bg-[#1a1d24] flex items-center justify-center text-slate-300 group-hover:bg-[#2b6be8]/10 group-hover:text-[#2b6be8] transition-all">
+                <Icon size={24} />
+              </div>
+              <span className="text-[13px] font-bold text-slate-300 text-center leading-tight">{item.label}</span>
+              {item.badge && (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${item.badgeColor} text-white`}>
+                  {item.badge}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Hot Market Tickers Grid (2x2) ──────────────────────────────────────────────
+function HotTickerCards({ prices }: { prices: CoinPrice[] }) {
+  const tickers = BINGX_HOT_TICKERS.map((t) => {
+    const live = prices.find((p) => p.symbol === t.base || p.symbol === t.base.replace("OIL", "").trim());
+    return {
+      ...t,
+      price: live ? live.price : t.price,
+      change24h: live ? live.changePercent24h : t.change24h,
+    };
+  });
+
+  return (
+    <div className="mb-5">
+      <div className="flex items-center justify-between mb-3 px-1">
+        <h2 className="text-white font-black text-base">Hot</h2>
+        <button className="text-[#2b6be8] text-xs font-bold hover:underline">View All</button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {tickers.map((ticker) => {
+          const isUp = ticker.change24h >= 0;
+          return (
+            <div
+              key={ticker.id}
+              className="bg-[#121418] rounded-2xl p-3 border border-[#1e2329] hover:border-slate-700 transition-all"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black text-white"
+                  style={{ backgroundColor: ticker.color }}
+                >
+                  {ticker.base.slice(0, 2)}
+                </div>
+                <div>
+                  <p className="text-white text-sm font-bold">{ticker.base}</p>
+                  <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">{ticker.name}</p>
+                </div>
+              </div>
+              <p className="text-white font-black text-lg mb-1">${fmtPrice(ticker.price)}</p>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                {isUp ? <TrendingUp size={12} className="text-emerald-400" /> : <TrendingDown size={12} className="text-rose-400" />}
+                <span className={`text-xs font-bold ${isUp ? "text-emerald-400" : "text-rose-400"}`}>
+                  {isUp ? "+" : ""}{ticker.change24h.toFixed(2)}%
+                </span>
+              </div>
+              <p className="text-slate-500 text-[11px] font-medium leading-tight">{ticker.headline}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Asset & Market Tabs ────────────────────────────────────────────────────────
+const MAIN_TABS = ["Favorites", "Hot", "Stocks", "TradFi", "Gainers", "New"];
+const SUBCATEGORIES = ["Trending", "US Stocks", "Korean Stocks", "Indices"];
+
+function AssetTabList({ prices }: { prices: CoinPrice[] }) {
+  const [activeTab, setActiveTab] = useState("Favorites");
+  const [activeSub, setActiveSub] = useState("Trending");
+
+  // Merge live prices into mock asset list
+  const assets = BINGX_ASSETS.map((a) => {
+    const live = prices.find((p) => p.symbol === a.base);
+    return { ...a, price: live ? live.price : a.price, change24h: live ? live.changePercent24h : a.change24h };
+  });
+
+  return (
+    <div className="mb-5">
+      {/* Main category tabs */}
+      <div className="flex gap-1 mb-3 overflow-x-auto scrollbar-hide -mx-1 px-1">
+        {MAIN_TABS.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex-shrink-0 pb-3 pt-1 px-1 relative text-sm font-bold transition-colors ${
+              activeTab === tab ? "text-white" : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            {tab}
+            {activeTab === tab && (
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#2b6be8] rounded-full" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Sub-category pills */}
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-1 px-1 mb-3">
+        {SUBCATEGORIES.map((sub) => (
+          <button
+            key={sub}
+            onClick={() => setActiveSub(sub)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+              activeSub === sub
+                ? "bg-[#2b6be8] text-white"
+                : "bg-[#1e2329] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+            }`}
+          >
+            {sub}
+          </button>
+        ))}
+      </div>
+
+      {/* Column headers */}
+      <div className="grid grid-cols-[2fr_1fr_1.5fr_1fr] gap-2 px-2 py-2 bg-[#121418] rounded-t-2xl border-b border-[#1e2329]">
+        <span className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Asset</span>
+        <span className="text-slate-500 text-[11px] font-bold uppercase tracking-wider text-right">Price</span>
+        <span className="text-slate-500 text-[11px] font-bold uppercase tracking-wider text-right">24h %</span>
+        <span className="text-slate-500 text-[11px] font-bold uppercase tracking-wider text-right">7d Chart</span>
+      </div>
+
+      {/* Asset rows */}
+      <div className="divide-y divide-[#1e2329]">
+        {assets.map((asset) => {
+          const isUp = asset.change24h >= 0;
+          return (
+            <div
+              key={asset.id}
+              className="grid grid-cols-[2fr_1fr_1.5fr_1fr] gap-2 items-center px-3 py-3 hover:bg-slate-800/30 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                  isUp ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"
+                }`}>
+                  {asset.base.slice(0, 2)}
+                </div>
+                <div className="overflow-hidden">
+                  <p className="text-white text-sm font-bold leading-tight">{asset.base}</p>
+                  <p className="text-slate-500 text-[10px] font-bold truncate">{asset.name}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-white text-sm font-bold">${fmtPrice(asset.price)}</p>
+              </div>
+              <div className="text-right flex items-center justify-end gap-1">
+                <PriceBadge change={asset.change24h} />
+              </div>
+              <div className="flex justify-end">
+                <div className={`w-16 h-6 opacity-60 ${isUp ? "text-emerald-400" : "text-rose-400"}`}>
+                  <svg viewBox="0 0 64 24" className="w-full h-full" preserveAspectRatio="none">
+                    <path
+                      d={isUp ? "M0 20 Q16 18 32 10 Q48 2 64 6" : "M0 6 Q16 8 32 14 Q48 22 64 18"}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Bottom Navigation ──────────────────────────────────────────────────────────
+function BottomNav({ onTabChange }: { onTabChange: (tab: string) => void }) {
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#0b0e11] border-t border-[#1e2329]">
+      <div className="flex items-center justify-around py-2 pb-2">
+        {BOTTOM_TABS.map((tab) => {
+          const isActive = tab.active;
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              className={`flex flex-col items-center gap-0.5 transition-colors relative ${
+                isActive ? "text-white" : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              {isActive && (
+                <span className="absolute -top-0.5 w-8 h-1 rounded-full bg-[#2b6be8] shadow-[0_0_8px_rgba(43,107,232,0.6)]" />
+              )}
+              <span className={isActive ? "drop-shadow-[0_0_6px_rgba(43,107,232,0.5)]" : ""}>
+                <Icon size={22} />
+              </span>
+              <span className={`text-[10px] font-bold tracking-wider ${isActive ? "text-[#2b6be8]" : ""}`}>
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="h-1 bg-[#1e2329]" />
+    </nav>
+  );
+}
+
+// ── Props ──────────────────────────────────────────────────────────────────────
 interface DashboardProps {
   prices: CoinPrice[];
   signals: Signal[];
@@ -36,729 +430,7 @@ interface DashboardProps {
   connectionStatus?: "connecting" | "live" | "simulated";
 }
 
-// ─── Equity Curve Chart ───────────────────────────────────────────────────────
-
-function EquityCurveChart({ serverUrl }: { serverUrl: string }) {
-  const { snapshot, loading, error } = useAnalytics(serverUrl);
-
-  const data = snapshot?.equityCurve ?? [];
-
-  // Format x-axis date labels
-  const fmt = (d: string) => {
-    try {
-      return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    } catch {
-      return d;
-    }
-  };
-
-  const minPnl = data.length > 0 ? Math.min(...data.map((d) => d.cumPnl)) : 0;
-  const maxPnl = data.length > 0 ? Math.max(...data.map((d) => d.cumPnl)) : 0;
-  const latestPnl = data.length > 0 ? data[data.length - 1].cumPnl : null;
-  const isPositive = (latestPnl ?? 0) >= 0;
-
-  return (
-    <PremiumCard>
-      <PremiumCardContent className="p-4 md:p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-white font-semibold text-sm tracking-wide uppercase">Equity Curve</h3>
-            <p className="text-slate-500 text-xs">Cumulative P&amp;L</p>
-          </div>
-          {latestPnl !== null && (
-            <span className={`text-sm font-bold ${isPositive ? "text-emerald-400" : "text-rose-400"}`}>
-              {isPositive ? "+" : ""}${latestPnl.toFixed(2)}
-            </span>
-          )}
-        </div>
-
-        {loading && data.length === 0 && (
-          <div className="h-48 flex items-center justify-center">
-            <span className="w-6 h-6 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
-          </div>
-        )}
-
-        {!loading && error && data.length === 0 && (
-          <div className="h-48 flex items-center justify-center text-slate-500 text-xs">
-            No equity data yet — start trading to build a curve.
-          </div>
-        )}
-
-        {!loading && !error && data.length === 0 && (
-          <div className="h-48 flex items-center justify-center text-slate-500 text-xs">
-            No trades recorded yet.
-          </div>
-        )}
-
-        {data.length > 0 && (
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={fmt}
-                  tick={{ fontSize: 10, fill: "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                  interval="preserveStartEnd"
-                  dy={10}
-                />
-                <YAxis
-                  domain={[Math.min(minPnl * 1.1, minPnl - 1), Math.max(maxPnl * 1.1, maxPnl + 1)]}
-                  tick={{ fontSize: 10, fill: "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v: number) => `$${v.toFixed(0)}`}
-                  width={40}
-                  dx={-10}
-                />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#090a0f", border: "1px solid #0ea5e9", borderRadius: 8, fontSize: 13, fontFamily: "Inter, sans-serif" }}
-                  labelFormatter={(l: string) => fmt(l)}
-                  formatter={(v: number) => [`$${v.toFixed(2)}`, "Cum. P&L"]}
-                />
-                <ReferenceLine y={0} stroke="#334155" strokeDasharray="3 3" />
-                <Area
-                  type="monotone"
-                  dataKey="cumPnl"
-                  stroke="#0ea5e9"
-                  strokeWidth={2}
-                  fill="url(#equityGrad)"
-                  dot={false}
-                  activeDot={{ r: 4, fill: "#0ea5e9", stroke: "#090a0f", strokeWidth: 2 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </PremiumCardContent>
-    </PremiumCard>
-  );
-}
-
-// ─── Account Metrics Panel ────────────────────────────────────────────────────
-
-interface AccountMetricsProps {
-  trades: Trade[];
-  totalPnL: number;
-  isBotRunning: boolean;
-  activeStrategy?: string;
-  connectionStatus?: "connecting" | "live" | "simulated";
-  serverStatus: {
-    balanceUSDT: number;
-    winRate: string;
-    totalTrades: number;
-    winningTrades: number;
-    losingTrades: number;
-    performance?: {
-      totalPnlUsd: number;
-      weekly7dPnl: number;
-      monthly30dPnl: number;
-      riskRewardRatio?: number;
-      avgHoldMins?: number;
-    } | null;
-    portfolio?: {
-      openCount: number;
-      totalUnrealizedPnl: number;
-    } | null;
-    mode: string;
-    activeStrategy?: string;
-    connection: "disconnected" | "connecting" | "connected" | "error";
-  };
-}
-
-function AccountMetrics({ trades, totalPnL, isBotRunning, connectionStatus, serverStatus }: AccountMetricsProps) {
-  const closedTrades  = trades.filter((t) => t.status === "closed");
-  const openTrades    = trades.filter((t) => t.status === "open");
-  const wins          = closedTrades.filter((t) => (t.pnl ?? 0) > 0).length;
-  const losses        = closedTrades.filter((t) => (t.pnl ?? 0) < 0).length;
-  const totalClosed   = closedTrades.length;
-  const winRate       = totalClosed > 0 ? (wins / totalClosed) * 100 : 0;
-  const lossRate      = totalClosed > 0 ? (losses / totalClosed) * 100 : 0;
-
-  // Today's trades (last 24h)
-  const now           = Date.now();
-  const todayTrades   = trades.filter((t) => {
-    try { return now - new Date(t.timestamp).getTime() < 86_400_000; } catch { return false; }
-  }).length;
-
-  const perf          = serverStatus.performance;
-  const port          = serverStatus.portfolio;
-
-  const realizedPnL   = perf?.totalPnlUsd ?? totalPnL;
-  const unrealizedPnL = port?.totalUnrealizedPnl ?? 0;
-  const equity        = (serverStatus.balanceUSDT || 0) + unrealizedPnL;
-  const weekly        = perf?.weekly7dPnl;
-  const monthly       = perf?.monthly30dPnl;
-
-  const serverUp      = serverStatus.connection === "connected";
-  const wsOk          = connectionStatus === "live" || connectionStatus === "simulated";
-
-  return (
-    <div className="space-y-4">
-      {/* Connection health row */}
-      <PremiumCard>
-        <PremiumCardContent className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Activity className="text-cyan-400" size={16} />
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider tracking-widest">System Health</p>
-          </div>
-          <div className="space-y-2 mb-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5 text-slate-400"><Server size={14}/> API Server</span>
-              <StatusBadge variant={serverUp ? "live" : "offline"} label={serverUp ? "CONNECTED" : "OFFLINE"} pulse={serverUp} />
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5 text-slate-400"><Wifi size={14}/> WebSocket Feed</span>
-              <StatusBadge variant={wsOk ? (connectionStatus === "live" ? "live" : "simulated") : "connecting"} label={wsOk ? (connectionStatus === "live" ? "LIVE" : "SIM") : "WAITING"} pulse={wsOk} />
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5 text-slate-400"><Bot size={14}/> Bot Engine</span>
-              <StatusBadge variant={isBotRunning ? "live" : "offline"} label={isBotRunning ? "RUNNING" : "STOPPED"} pulse={isBotRunning} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2 pt-3 border-t border-white/5">
-            <span className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Mode</span>
-            <StatusBadge 
-              variant={serverStatus.mode === "LIVE" ? "live" : serverStatus.mode === "PAPER" ? "simulated" : "offline"} 
-              label={serverStatus.mode}
-            />
-          </div>
-          {serverStatus.activeStrategy && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Strategy</span>
-              <span className="text-sm font-semibold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">{serverStatus.activeStrategy}</span>
-            </div>
-          )}
-        </PremiumCardContent>
-      </PremiumCard>
-
-      {/* Account equity + balance */}
-      <div className="grid grid-cols-2 gap-3">
-        <PremiumCard>
-          <PremiumCardContent className="p-4">
-            <p className="text-slate-500 text-[13px] font-bold mb-1 uppercase tracking-wide">Balance (USDT)</p>
-            <p className="text-white font-bold text-lg">
-              {serverStatus.balanceUSDT > 0
-                ? `$${serverStatus.balanceUSDT.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-                : "—"}
-            </p>
-            <p className="text-slate-500 text-[13px] font-bold uppercase mt-1 tracking-wider">Available</p>
-          </PremiumCardContent>
-        </PremiumCard>
-        <PremiumCard>
-          <PremiumCardContent className="p-4">
-            <p className="text-slate-500 text-[13px] font-bold mb-1 uppercase tracking-wide">Equity</p>
-            <p className={`font-bold text-lg ${equity > 0 ? "text-white" : "text-slate-500"}`}>
-              {equity > 0 ? `$${equity.toFixed(2)}` : "—"}
-            </p>
-            <p className="text-slate-500 text-[13px] font-bold uppercase mt-1 tracking-wider">Total Value</p>
-          </PremiumCardContent>
-        </PremiumCard>
-      </div>
-
-      {/* P&L breakdown */}
-      <PremiumCard>
-        <PremiumCardContent className="p-4 space-y-3">
-          <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider tracking-widest flex items-center gap-1.5"><Activity size={14}/> P&amp;L Breakdown</p>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-400">Realized P&amp;L</span>
-            <span className={`font-bold ${realizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {realizedPnL >= 0 ? "+" : ""}${realizedPnL.toFixed(2)}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-400">Unrealized P&amp;L</span>
-            <span className={`font-bold ${unrealizedPnL >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {unrealizedPnL >= 0 ? "+" : ""}${unrealizedPnL.toFixed(2)}
-            </span>
-          </div>
-          {weekly !== undefined && (
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Weekly (7d)</span>
-              <span className={`font-bold ${(weekly ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                {(weekly ?? 0) >= 0 ? "+" : ""}${(weekly ?? 0).toFixed(2)}
-              </span>
-            </div>
-          )}
-          {monthly !== undefined && (
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Monthly (30d)</span>
-              <span className={`font-bold ${(monthly ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                {(monthly ?? 0) >= 0 ? "+" : ""}${(monthly ?? 0).toFixed(2)}
-              </span>
-            </div>
-          )}
-        </PremiumCardContent>
-      </PremiumCard>
-
-      {/* Trade stats */}
-      <PremiumCard>
-        <PremiumCardContent className="p-4 space-y-3">
-          <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider tracking-widest flex items-center gap-1.5"><BarChart2 size={14}/> Trade Statistics</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-            <div>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Total Trades</p>
-              <p className="text-white font-bold">{serverStatus.totalTrades || totalClosed}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Active Positions</p>
-              <p className="text-white font-bold">{port?.openCount ?? openTrades.length}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Today's Trades</p>
-              <p className="text-white font-bold">{todayTrades}</p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Win Rate</p>
-              <p className={`font-bold ${winRate >= 55 ? "text-emerald-400" : winRate >= 40 ? "text-amber-400" : "text-rose-400"}`}>
-                {serverStatus.winRate !== "0" ? `${serverStatus.winRate}%` : `${winRate.toFixed(1)}%`}
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Loss Rate</p>
-              <p className={`font-bold ${lossRate <= 45 ? "text-emerald-400" : "text-rose-400"}`}>
-                {lossRate.toFixed(1)}%
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-500 text-[13px] font-bold uppercase tracking-wider">Wins / Losses</p>
-              <p className="text-white font-bold">
-                <span className="text-emerald-400">{serverStatus.winningTrades || wins}</span>
-                <span className="text-slate-500 mx-1">/</span>
-                <span className="text-rose-400">{serverStatus.losingTrades || losses}</span>
-              </p>
-            </div>
-          </div>
-        </PremiumCardContent>
-      </PremiumCard>
-    </div>
-  );
-}
-
-// ─── Heatmap cell ─────────────────────────────────────────────────────────────
-
-function HeatmapCell({ coin }: { coin: CoinPrice }) {
-  const pct  = coin.changePercent24h;
-  const abs  = Math.abs(pct);
-  const intensity = Math.min(abs / 5, 1);
-  const isUp = pct >= 0;
-  const bg = isUp
-    ? `rgba(16, 185, 129, ${0.1 + intensity * 0.4})`
-    : `rgba(244, 63, 94, ${0.1 + intensity * 0.4})`;
-
-  return (
-    <div
-      className="rounded-lg p-3 flex flex-col items-center justify-center border border-transparent hover:border-slate-600 transition-all cursor-default"
-      style={{ backgroundColor: bg }}
-    >
-      <p className="text-white text-xs font-bold">{coin.symbol}</p>
-      <p className={`text-sm font-semibold ${isUp ? "text-emerald-300" : "text-rose-300"}`}>
-        {isUp ? "+" : ""}{pct.toFixed(2)}%
-      </p>
-    </div>
-  );
-}
-
-// ─── Conservative Scalping v2 Status Panel ────────────────────────────────────
-
-interface CSCounters {
-  ok: boolean;
-  version: string;
-  month: string;
-  monthlyTotal: number;
-  monthlyCap: number;
-  dailyTotal: number;
-  dailyCap: number;
-  bySymbol: Record<string, number>;
-  symbolMonthlyCap: number;
-  projection: number;
-  targetMin: number;
-  targetMax: number;
-  approvedSymbols: string[];
-  params: {
-    trendframe: string;
-    entryframe: string;
-    rsiBuyLow: number;
-    rsiBuyHigh: number;
-    volumeRatio: number;
-    atrMinPct: number;
-    atrMaxPct: number;
-    stopLossPct: number;
-    takeProfitPct: number;
-    minConditions: number;
-  };
-}
-
-function ConservativeScalpingPanel() {
-  const [data, setData] = useState<CSCounters | null>(null);
-
-  const fetchData = useCallback(() => {
-    const token = localStorage.getItem("pcb_jwt") ?? "";
-    fetch(`${SERVER_URL}/api/strategy/conservative-scalping/counters`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(d => { if (d.ok) setData(d as CSCounters); })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    const id = setInterval(fetchData, 30_000);
-    return () => clearInterval(id);
-  }, [fetchData]);
-
-  const monthPct   = data ? (data.monthlyTotal / data.monthlyCap) * 100 : 0;
-  const onTarget   = data ? data.projection >= data.targetMin && data.projection <= data.targetMax : null;
-  const topSymbols = data
-    ? Object.entries(data.bySymbol).sort(([,a],[,b]) => b - a).slice(0, 5)
-    : [];
-
-  return (
-    <PremiumCard animatedBorder>
-      <PremiumCardContent className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <StatusBadge variant="live" label="CONSERVATIVE SCALPING v2" glow pulse />
-            <span className="text-slate-500 text-sm font-semibold tracking-wider">Phase 8.4</span>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="px-2 py-0.5 rounded text-slate-300 bg-slate-800 font-sans font-semibold">15m trend</span>
-            <span className="text-slate-500">→</span>
-            <span className="px-2 py-0.5 rounded text-slate-300 bg-slate-800 font-sans font-semibold">15m entry</span>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-white/5">
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider mb-1">This Month</p>
-            <p className="text-white font-black text-2xl">{data?.monthlyTotal ?? "—"}</p>
-            <p className="text-slate-500 text-xs mt-1">/ {data?.monthlyCap ?? 60} cap</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-white/5">
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider mb-1">Today</p>
-            <p className="text-white font-black text-2xl">{data?.dailyTotal ?? "—"}</p>
-            <p className="text-slate-500 text-xs mt-1">/ {data?.dailyCap ?? 6} cap</p>
-          </div>
-          <div className={`rounded-xl p-4 text-center border ${
-            onTarget === null ? "bg-slate-800/50 border-white/5" :
-            onTarget ? "bg-emerald-500/10 border-emerald-500/30" : "bg-amber-500/10 border-amber-500/30"
-          }`}>
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider mb-1">Projection</p>
-            <p className={`font-black text-2xl ${onTarget ? "text-emerald-400" : "text-amber-400"}`}>
-              {data ? `~${data.projection}` : "—"}
-            </p>
-            <p className="text-slate-500 text-xs mt-1">target 30–60</p>
-          </div>
-        </div>
-        {data && (
-          <div>
-            <div className="flex justify-between text-[13px] font-bold text-slate-400 mb-2 uppercase tracking-wide font-medium">
-              <span>Monthly Progress: {data.monthlyTotal}</span>
-              <span>{monthPct.toFixed(0)}% of cap</span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  monthPct >= 100 ? "bg-rose-500" : monthPct >= 67 ? "bg-amber-500" : "bg-cyan-500"
-                }`}
-                style={{ width: `${Math.min(monthPct, 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {topSymbols.length > 0 && (
-          <div className="pt-2">
-            <p className="text-slate-400 text-[13px] font-bold mb-3 uppercase tracking-wide font-medium">Trades by symbol this month</p>
-            <div className="space-y-2.5">
-              {topSymbols.map(([sym, count]) => (
-                <div key={sym} className="flex items-center gap-3">
-                  <span className="text-slate-300 text-sm font-semibold font-bold w-16 shrink-0">{sym}</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className="h-full bg-cyan-500 rounded-full"
-                      style={{ width: `${Math.min((count / (data?.symbolMonthlyCap ?? 15)) * 100, 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-slate-400 text-sm font-semibold w-10 text-right">{count}/{data?.symbolMonthlyCap ?? 15}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="flex gap-2 flex-wrap text-xs pt-2">
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">EMA50/200 trend (15m)</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">EMA9/21 entry (15m)</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">RSI 38–68</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">Vol ≥0.7×</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">SL 0.7% / TP 1.2%</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">Min 4/6 conditions</span>
-        </div>
-      </PremiumCardContent>
-    </PremiumCard>
-  );
-}
-
-// ─── Active Swing Status Panel ────────────────────────────────────────────────
-
-interface ASCounters {
-  month: string;
-  monthlyTotal: number;
-  monthlyCap: number;
-  dailyTotal: number;
-  dailyCap: number;
-  bySymbol: Record<string, number>;
-  symbolMonthlyCap: number;
-  projection: number;
-  targetMin: number;
-  targetMax: number;
-  approvedSymbols: string[];
-}
-
-function ActiveSwingPanel() {
-  const [data, setData] = useState<ASCounters | null>(null);
-
-  useEffect(() => {
-    const token = localStorage.getItem("pcb_jwt") ?? "";
-    fetch(`${SERVER_URL}/api/strategy/active-swing/counters`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(d => { if (d.ok) setData(d as ASCounters); })
-      .catch(() => {});
-
-    const id = setInterval(() => {
-      const tok = localStorage.getItem("pcb_jwt") ?? "";
-      fetch(`${SERVER_URL}/api/strategy/active-swing/counters`, {
-        headers: { Authorization: `Bearer ${tok}` },
-      })
-        .then(r => r.json())
-        .then(d => { if (d.ok) setData(d as ASCounters); })
-        .catch(() => {});
-    }, 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const monthPct  = data ? (data.monthlyTotal / data.monthlyCap) * 100 : 0;
-  const onTarget  = data ? data.projection >= data.targetMin && data.projection <= data.targetMax : null;
-  const topSymbols = data
-    ? Object.entries(data.bySymbol).sort(([,a],[,b]) => b - a).slice(0, 5)
-    : [];
-
-  return (
-    <PremiumCard animatedBorder>
-      <PremiumCardContent className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <StatusBadge variant="live" label="ACTIVE SWING" className="!bg-purple-500/20 !text-purple-300 !border-purple-500/40" />
-            <span className="text-slate-500 text-sm font-semibold tracking-wider">Phase 8.5</span>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="px-2 py-0.5 rounded text-slate-300 bg-slate-800 font-sans font-semibold">4h trend</span>
-            <span className="text-slate-500">→</span>
-            <span className="px-2 py-0.5 rounded text-slate-300 bg-slate-800 font-sans font-semibold">4h entry</span>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-white/5">
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider mb-1">This Month</p>
-            <p className="text-white font-black text-2xl">{data?.monthlyTotal ?? "—"}</p>
-            <p className="text-slate-500 text-xs mt-1">/ {data?.monthlyCap ?? 25} cap</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 text-center border border-white/5">
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider mb-1">Today</p>
-            <p className="text-white font-black text-2xl">{data?.dailyTotal ?? "—"}</p>
-            <p className="text-slate-500 text-xs mt-1">/ {data?.dailyCap ?? 2} cap</p>
-          </div>
-          <div className={`rounded-xl p-4 text-center border ${
-            onTarget === null ? "bg-slate-800/50 border-white/5" :
-            onTarget ? "bg-emerald-500/10 border-emerald-500/30" : "bg-amber-500/10 border-amber-500/30"
-          }`}>
-            <p className="text-slate-400 text-[13px] font-bold uppercase tracking-wider mb-1">Projection</p>
-            <p className={`font-black text-2xl ${onTarget ? "text-emerald-400" : "text-amber-400"}`}>
-              {data ? `~${data.projection}` : "—"}
-            </p>
-            <p className="text-slate-500 text-xs mt-1">target 15–25</p>
-          </div>
-        </div>
-        {data && (
-          <div>
-            <div className="flex justify-between text-[13px] font-bold text-slate-400 mb-2 uppercase tracking-wide font-medium">
-              <span>Monthly Progress: {data.monthlyTotal}</span>
-              <span>{monthPct.toFixed(0)}% of cap</span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  monthPct >= 100 ? "bg-rose-500" : monthPct >= 67 ? "bg-amber-500" : "bg-purple-500"
-                }`}
-                style={{ width: `${Math.min(monthPct, 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {topSymbols.length > 0 && (
-          <div className="pt-2">
-            <p className="text-slate-400 text-[13px] font-bold mb-3 uppercase tracking-wide font-medium">Trades by symbol this month</p>
-            <div className="space-y-2.5">
-              {topSymbols.map(([sym, count]) => (
-                <div key={sym} className="flex items-center gap-3">
-                  <span className="text-slate-300 text-sm font-semibold font-bold w-16 shrink-0">{sym}</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className="h-full bg-purple-500 rounded-full"
-                      style={{ width: `${Math.min((count / (data?.symbolMonthlyCap ?? 10)) * 100, 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-slate-400 text-sm font-semibold w-10 text-right">{count}/{data?.symbolMonthlyCap ?? 10}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="flex gap-2 flex-wrap text-xs pt-2">
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">EMA50/200 trend (4h)</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">EMA20/50 entry (4h)</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">RSI 35–65</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">Vol ≥0.8×</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">SL 1.2% / TP 2.0%</span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300">Min 4/5 conditions</span>
-        </div>
-      </PremiumCardContent>
-    </PremiumCard>
-  );
-}
-
-// ─── Portfolio Allocation Summary ─────────────────────────────────────────────
-
-function PortfolioAllocation({ portfolio }: { portfolio: PortfolioAsset[] }) {
-  if (portfolio.length === 0) return null;
-  const total = portfolio.reduce((s, a) => s + a.amount * a.currentPrice, 0);
-  return (
-    <PremiumCard>
-      <PremiumCardContent className="p-4 md:p-5">
-        <h3 className="text-white font-semibold text-sm mb-4 uppercase tracking-wide">Portfolio Allocation</h3>
-        <div className="space-y-3">
-          {portfolio.map((a) => {
-            const val = a.amount * a.currentPrice;
-            const pct = total > 0 ? (val / total) * 100 : 0;
-            return (
-              <div key={a.id} className="flex items-center gap-3 text-sm">
-                <span className="text-slate-300 font-bold w-12 shrink-0">{a.symbol}</span>
-                <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{ width: `${pct}%`, backgroundColor: a.color ?? "#0ea5e9" }}
-                  />
-                </div>
-                <span className="text-slate-400 w-12 text-right text-sm font-medium">{pct.toFixed(1)}%</span>
-                <span className="text-slate-300 w-20 text-right font-semibold">${val.toFixed(0)}</span>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-4 pt-4 border-t border-white/5 flex justify-between text-sm">
-          <span className="text-slate-400 font-medium">Total Value</span>
-          <span className="text-white font-bold text-lg">
-            ${total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-          </span>
-        </div>
-      </PremiumCardContent>
-    </PremiumCard>
-  );
-}
-
-// ─── Server status hook (lightweight, uses existing /api/status) ──────────────
-
-interface SimpleServerStatus {
-  balanceUSDT: number;
-  winRate: string;
-  totalTrades: number;
-  winningTrades: number;
-  losingTrades: number;
-  mode: string;
-  activeStrategy?: string;
-  connection: "disconnected" | "connecting" | "connected" | "error";
-  dailyPnL: number;
-  isRunning: boolean;
-  isKilled: boolean;
-  performance?: {
-    totalPnlUsd: number;
-    weekly7dPnl: number;
-    monthly30dPnl: number;
-  } | null;
-  portfolio?: {
-    openCount: number;
-    totalUnrealizedPnl: number;
-  } | null;
-  analytics?: {
-    profitFactor: number;
-    maxDrawdownPct: number;
-  } | null;
-}
-
-function useServerStatus(): SimpleServerStatus {
-  const [s, setS] = useState<SimpleServerStatus>({
-    balanceUSDT: 0,
-    winRate: "0",
-    totalTrades: 0,
-    winningTrades: 0,
-    losingTrades: 0,
-    mode: "UNKNOWN",
-    connection: "connecting",
-    dailyPnL: 0,
-    isRunning: false,
-    isKilled: false,
-  });
-
-  const fetch_ = useCallback(() => {
-    const token = localStorage.getItem("pcb_jwt") ?? "";
-    const authHeader = { Authorization: `Bearer ${token}` };
-    Promise.all([
-      fetch(`${SERVER_URL}/api/status`, { headers: authHeader }).then(r => r.json()),
-      fetch(`${SERVER_URL}/api/analytics`, { headers: authHeader }).then(r => r.json()).catch(() => null),
-    ])
-      .then(([d, a]: [Record<string, unknown>, Record<string, unknown> | null]) => {
-        if (d.ok) {
-          const metrics = (a?.metrics as { profitFactor?: number; maxDrawdownPct?: number } | undefined);
-          setS({
-            balanceUSDT:  (d.balanceUSDT as number) || 0,
-            winRate:      (d.winRate as string) || "0",
-            totalTrades:  (d.totalTrades as number) || 0,
-            winningTrades:(d.winningTrades as number) || 0,
-            losingTrades: (d.losingTrades as number) || 0,
-            mode:         (d.mode as string) || "UNKNOWN",
-            activeStrategy: d.activeStrategy as string | undefined,
-            connection:   "connected",
-            dailyPnL:     (d.dailyPnL as number) || 0,
-            isRunning:    Boolean(d.isRunning),
-            isKilled:     Boolean(d.isKilled),
-            performance:  (d.performance as SimpleServerStatus["performance"]) ?? null,
-            portfolio:    (d.portfolio as SimpleServerStatus["portfolio"]) ?? null,
-            analytics:    metrics ? { profitFactor: metrics.profitFactor ?? 0, maxDrawdownPct: metrics.maxDrawdownPct ?? 0 } : null,
-          });
-        }
-      })
-      .catch(() => { setS(prev => ({ ...prev, connection: "error" })); });
-  }, []);
-
-  useEffect(() => {
-    fetch_();
-    const id = setInterval(fetch_, 10_000);
-    return () => clearInterval(id);
-  }, [fetch_]);
-
-  return s;
-}
-
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
-
+// ── Main Dashboard (BingX layout) ──────────────────────────────────────────────
 export function Dashboard({
   prices,
   signals,
@@ -769,227 +441,66 @@ export function Dashboard({
   isBotRunning,
   activeStrategy,
   onTabChange,
-  connectionStatus = "connecting",
+  connectionStatus,
 }: DashboardProps) {
-  const topSignals    = signals.slice(0, 3);
-  const recentTrades  = trades.slice(0, 5);
-  const openPositions = trades.filter(t => t.status === "open");
-
-  const serverStatus  = useServerStatus();
-
-  const isActiveSwing  = (activeStrategy ?? serverStatus.activeStrategy) === "active-swing";
-  const isConsScalping = (activeStrategy ?? serverStatus.activeStrategy) === "conservative-scalping";
-
-  const closedTrades  = trades.filter(t => t.status === "closed");
-  const wins          = closedTrades.filter(t => (t.pnl ?? 0) > 0).length;
-  const winRate       = closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0;
-  const displayedWinRate = serverStatus.winRate !== "0"
-    ? `${serverStatus.winRate}%`
-    : `${winRate.toFixed(1)}%`;
+  const openPositions = trades.filter((t) => t.status === "open");
+  const topSignals = signals.slice(0, 3);
 
   return (
-    <div className="space-y-6">
-      {/* Strategy-specific panels */}
-      {isActiveSwing  && <ActiveSwingPanel />}
-      {isConsScalping && <ConservativeScalpingPanel />}
+    <div className="space-y-6 pb-20">
+      {/* BingX Header Bar */}
+      <BingXHeader />
 
-      {/* Top stats row — real data from /api/status + /api/analytics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-        <PremiumStatCard
-          title="Balance (USDT)"
-          value={serverStatus.balanceUSDT > 0 ? serverStatus.balanceUSDT : "—"}
-          valuePrefix={serverStatus.balanceUSDT > 0 ? "$" : undefined}
-          subtitle={`${serverStatus.mode} mode`}
-          icon={<Wallet size={16} />}
-        />
-        <PremiumStatCard
-          title="Unrealized P&L"
-          value={Math.abs(serverStatus.portfolio?.totalUnrealizedPnl ?? 0)}
-          valuePrefix={(serverStatus.portfolio?.totalUnrealizedPnl ?? 0) >= 0 ? "+$" : "-$"}
-          valueColor={(serverStatus.portfolio?.totalUnrealizedPnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}
-          subtitle={`${serverStatus.portfolio?.openCount ?? 0} open position${serverStatus.portfolio?.openCount === 1 ? "" : "s"}`}
-          icon={<TrendingUp size={16} />}
-        />
-        <PremiumStatCard
-          title="Today's P&L"
-          value={Math.abs(serverStatus.dailyPnL)}
-          valuePrefix={serverStatus.dailyPnL >= 0 ? "+$" : "-$"}
-          valueColor={serverStatus.dailyPnL >= 0 ? "text-emerald-400" : "text-rose-400"}
-          subtitle="Since midnight UTC"
-          icon={<Activity size={16} />}
-        />
-        <PremiumStatCard
-          title="Realized P&L"
-          value={Math.abs(serverStatus.performance?.totalPnlUsd ?? totalPnL)}
-          valuePrefix={(serverStatus.performance?.totalPnlUsd ?? totalPnL) >= 0 ? "+$" : "-$"}
-          valueColor={(serverStatus.performance?.totalPnlUsd ?? totalPnL) >= 0 ? "text-emerald-400" : "text-rose-400"}
-          subtitle="All-time"
-          icon={<Activity size={16} />}
-        />
-        <PremiumStatCard
-          title="Win Rate"
-          value={displayedWinRate.replace('%', '')}
-          valueSuffix="%"
-          subtitle={`${serverStatus.totalTrades || closedTrades.length} total trades`}
-          valueColor={parseFloat(displayedWinRate) >= 55 ? "text-emerald-400" : parseFloat(displayedWinRate) >= 40 ? "text-amber-400" : "text-rose-400"}
-          icon={<Target size={16} />}
-        />
-        <PremiumStatCard
-          title="Profit Factor"
-          value={serverStatus.analytics ? serverStatus.analytics.profitFactor.toFixed(2) : "—"}
-          subtitle="Gross win / gross loss"
-          valueColor={
-            !serverStatus.analytics ? undefined :
-            serverStatus.analytics.profitFactor >= 1.5 ? "text-emerald-400" :
-            serverStatus.analytics.profitFactor >= 1 ? "text-amber-400" : "text-rose-400"
-          }
-          icon={<Microscope size={16} />}
-        />
-        <PremiumStatCard
-          title="Max Drawdown"
-          value={serverStatus.analytics ? serverStatus.analytics.maxDrawdownPct.toFixed(1) : "—"}
-          valueSuffix={serverStatus.analytics ? "%" : undefined}
-          subtitle="Peak-to-trough equity"
-          valueColor="text-rose-300"
-          icon={<TrendingDown size={16} />}
-        />
-        <PremiumStatCard
-          title="Bot Status"
-          value={serverStatus.isKilled ? "HALTED" : serverStatus.isRunning ? "RUNNING" : "PAUSED"}
-          subtitle={serverStatus.connection === "connected" ? "Gate.io connected" : "Connection issue"}
-          valueColor={serverStatus.isKilled ? "text-rose-400" : serverStatus.isRunning ? "text-emerald-400" : "text-slate-400"}
-          icon={<Activity size={16} />}
-        />
-      </div>
+      <div className="max-w-[1200px] mx-auto px-4 pt-4 space-y-4">
+        {/* Promotional Banner */}
+        <PromoBanner onCTAClick={() => onTabChange("manual-trading")} />
 
-      {/* Three-column layout */}
-      <div className="grid lg:grid-cols-3 gap-6">
+        {/* Quick Actions Row */}
+        <QuickActionsRow />
 
-        {/* Left: market data + heatmap */}
-        <div className="lg:col-span-2 space-y-4">
+        {/* Hot Market Ticker Cards */}
+        <HotTickerCards prices={prices} />
 
-          {/* Market Overview table */}
-          <MarketOverview prices={prices} connectionStatus={connectionStatus} />
+        {/* Asset & Market Tabs */}
+        <AssetTabList prices={prices} />
 
-          {/* Live price cards (top 4) */}
+        {/* Open Positions (keep existing card) */}
+        {openPositions.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-white font-semibold uppercase tracking-wide text-sm">Live Prices</h2>
-              <button onClick={() => onTabChange("signals")} className="text-cyan-400 text-[13px] font-bold uppercase tracking-wider tracking-wide hover:text-cyan-300">
-                View signals →
-              </button>
+              <h2 className="text-white font-semibold uppercase tracking-wide text-sm">Open Positions</h2>
+              <span className="text-xs font-black px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-400 tracking-wider">
+                {openPositions.length} LIVE
+              </span>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              {prices.slice(0, 4).map((coin) => (
-                <PriceCard key={coin.id} coin={coin} />
+            <div className="space-y-3">
+              {openPositions.map((t) => (
+                <OpenPositionCard
+                  key={t.id}
+                  trade={t}
+                  prices={prices}
+                  calledBy="Dashboard"
+                />
               ))}
             </div>
           </div>
+        )}
 
-          {/* 24h Heatmap */}
-          <PremiumCard>
-            <PremiumCardContent className="p-4 md:p-5">
-              <h3 className="text-white font-semibold text-sm mb-4 uppercase tracking-wide">24h Market Heatmap</h3>
-              <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
-                {prices.map((coin) => <HeatmapCell key={coin.id} coin={coin} />)}
-              </div>
-            </PremiumCardContent>
-          </PremiumCard>
-
-          {/* Equity curve */}
-          <EquityCurveChart serverUrl={SERVER_URL} />
-
-          {/* Portfolio allocation */}
-          {portfolio.length > 0 && <PortfolioAllocation portfolio={portfolio} />}
+        {/* Latest Signals */}
+        <div className="flex items-center justify-between mt-6 mb-4">
+          <h2 className="text-white font-semibold uppercase tracking-wide text-sm">Latest Signals</h2>
+          <button onClick={() => onTabChange("signals")} className="text-cyan-400 text-[13px] font-bold uppercase tracking-wider tracking-wide hover:text-cyan-300">
+            All signals →
+          </button>
         </div>
-
-        {/* Right column: account metrics + positions + signals + trades */}
-        <div className="space-y-4">
-
-          {/* Account metrics & system health */}
-          <AccountMetrics
-            trades={trades}
-            totalPnL={totalPnL}
-            isBotRunning={isBotRunning}
-            connectionStatus={connectionStatus}
-            serverStatus={serverStatus}
-          />
-
-          {/* Open positions */}
-          {openPositions.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-white font-semibold uppercase tracking-wide text-sm">Open Positions</h2>
-                <span className="text-xs font-black px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-400 tracking-wider">
-                  {openPositions.length} LIVE
-                </span>
-              </div>
-              <div className="space-y-3">
-                {openPositions.map(t => (
-                  <OpenPositionCard
-                    key={t.id}
-                    trade={t}
-                    prices={prices}
-                    calledBy="Dashboard"
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Latest signals */}
-          <div className="flex items-center justify-between mt-6 mb-4">
-            <h2 className="text-white font-semibold uppercase tracking-wide text-sm">Latest Signals</h2>
-            <button onClick={() => onTabChange("signals")} className="text-cyan-400 text-[13px] font-bold uppercase tracking-wider tracking-wide hover:text-cyan-300">
-              All signals →
-            </button>
-          </div>
-          {topSignals.length > 0
-            ? topSignals.map((sig) => <SignalCard key={sig.id} signal={sig} />)
-            : <PremiumCard><PremiumCardContent className="p-4"><p className="text-slate-500 text-xs text-center py-4">No signals yet.</p></PremiumCardContent></PremiumCard>
-          }
-
-          {/* Recent trades */}
-          <div className="flex items-center justify-between mt-6 mb-4">
-            <h2 className="text-white font-semibold uppercase tracking-wide text-sm">Recent Trades</h2>
-            <button onClick={() => onTabChange("trades")} className="text-cyan-400 text-[13px] font-bold uppercase tracking-wider tracking-wide hover:text-cyan-300">
-              All trades →
-            </button>
-          </div>
-          <PremiumCard>
-            <PremiumCardContent className="p-0">
-              {recentTrades.length === 0 ? (
-                <p className="text-slate-500 text-xs text-center py-6">No trades yet — start the bot!</p>
-              ) : (
-                <div className="divide-y divide-white/5">
-                  {recentTrades.map((t) => {
-                    const up = (t.pnl || 0) >= 0;
-                    return (
-                      <div key={t.id} className="px-4 py-3 flex items-center justify-between hover:bg-slate-800/50 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <StatusBadge variant={t.type === "BUY" ? "buy" : "sell"} label={t.type} />
-                          <div>
-                            <p className="text-white text-sm font-bold">{t.symbol}</p>
-                            <p className="text-slate-500 text-sm font-semibold">{t.amount} units</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          {t.pnl !== undefined && (
-                            <p className={`text-sm font-semibold font-bold ${up ? "text-emerald-400" : "text-rose-400"}`}>
-                              {up ? "+" : ""}${t.pnl.toFixed(2)}
-                            </p>
-                          )}
-                          <p className="text-slate-500 text-[13px] font-bold uppercase font-bold tracking-wider mt-0.5">{t.status}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </PremiumCardContent>
-          </PremiumCard>
-        </div>
+        {topSignals.length > 0
+          ? topSignals.map((sig) => <SignalCard key={sig.id} signal={sig} />)
+          : <PremiumCard><PremiumCardContent className="p-4"><p className="text-slate-500 text-xs text-center py-4">No signals yet.</p></PremiumCardContent></PremiumCard>
+        }
       </div>
+
+      {/* Persistent Bottom Navigation */}
+      <BottomNav onTabChange={onTabChange} />
     </div>
   );
 }
